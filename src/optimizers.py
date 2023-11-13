@@ -76,6 +76,7 @@ def cal_term1(alter_sc_exp,sc_meta,st_exp,hvg,W_HVG):
     loss_1 = mean_squared_error(st_exp,div_sc_spot)
     return term1_df,loss_1
 
+
 def cal_term2(alter_sc_exp,sc_distribution):
     '''
     2. Second term, towards sc cell-type specific expression
@@ -85,6 +86,29 @@ def cal_term2(alter_sc_exp,sc_distribution):
     term2_df = pd.DataFrame(term2,index = alter_sc_exp.index,columns=alter_sc_exp.columns)
     loss_2 = mean_squared_error(sc_distribution, alter_sc_exp)
     return term2_df,loss_2     
+
+
+def findSpotKNN(st_coord, st_tp): 
+    # TODO
+    # write on 1107 to replace findSpotNeighbor in the future
+    # no need for slide-seq exceptions
+    # for sc usage, moderate k? == further research
+    # 如果这么写就无法检测离群点了会不会有影响？
+    coordinates = st_coord.values
+    if st_tp != 'slide-seq':
+        k = 4
+    else:
+        k = 6
+    kdtree = KDTree(coordinates)
+    distances, indices = kdtree.query(coordinates, k+1)
+    knn_dict = {}
+    spots_id = st_coord.index.tolist()
+    for i, nearest_indices in enumerate(indices):
+        point = nearest_indices[0]
+        knn = nearest_indices[1:].tolist()
+        knn_dict[spots_id[point]] = [spots_id[i] for i in knn]
+    return knn_dict
+
 
 def findSpotNeighbor(st_coord,st_tp):
     all_x = np.sort(list(set(st_coord.iloc[:,0])))

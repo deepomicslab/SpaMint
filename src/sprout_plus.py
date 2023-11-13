@@ -70,12 +70,12 @@ class SproutImpute:
             os.makedirs(self.save_path)
 
         utils.check_st_tp(self.st_tp)
-        # self.sc_adata = utils.check_sc_meta_col(self.sc_adata)
-        self.st_coord = utils.check_st_coord(self.st_adata)
         self.st_adata, self.sc_adata, self.sc_ref, self.weight = utils.check_index_str(self.st_adata, self.sc_adata, self.sc_ref, self.weight)
         self.st_adata, self.weight = utils.check_spots(self.st_adata,self.weight)
+        self.st_coord = utils.check_st_coord(self.st_adata)
         self.lr_df = utils.align_lr_gene(self)
         utils.check_st_sc_pair(self.st_adata, self.sc_adata)
+        self.sc_adata,self.sc_ref = utils.check_sc(self.sc_adata, self.sc_ref)
         utils.check_decon_type(self.weight, self.sc_adata, self.cell_type_key)
         print('Parameters checked!')
 
@@ -91,6 +91,19 @@ class SproutImpute:
         # TODO redundant with feature selection in init
         self.svg = optimizers.get_hvg(self.st_adata)
         print('Getting svg genes')
+        # 4. remove no neighbor spots
+        spots_nn_lst = optimizers.findSpotKNN(self.st_coord,self.st_tp)
+        # TODO 可能会没有empty spots需要del
+        empty_spots = [k for k, v in spots_nn_lst.items() if not v]
+        if empty_spots:
+            # empty_spots is not empty
+            #remove from spots_nn_lst is key have empty value, which means spot have no neighbor
+            spots_nn_lst = {k: v for k, v in spots_nn_lst.items() if v}
+            #remove empty spots from st_exp
+            self.st_exp = self.st_exp.drop(empty_spots)
+            self.st_coord = self.st_coord.drop(empty_spots)
+            self.weight = self.weight.drop(empty_spots)
+        self.spots_nn_lst = spots_nn_lst
         # self.spot_cell_dict = self.sc_meta.groupby('spot').apply(optimizers.apply_spot_cell).to_dict()
         self.st_aff_profile_df = optimizers.cal_aff_profile(self.st_exp, self.lr_df)
 
@@ -137,13 +150,13 @@ class SproutImpute:
         #     sc_meta_re.index = sc_meta_re['sc_id']
         #     sc_exp_re.index = sc_meta_re.index
         #     print('Using sc agg for cell re-selection.')
-        print('Selection start...')
+        print('\t Swap selection start...')
         for i in range(max_rep):
             self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.sc_exp,result,self.st_exp)
             self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df)
-            result,self.picked_time = cell_selection.reselect_cell(self.st_exp, self.st_coord,self.st_aff_profile_df, 
+            result,self.picked_time = cell_selection.reselect_cell(self.st_exp, self.spots_nn_lst, self.st_aff_profile_df, 
                                     sc_exp_re, sc_meta_re, self.sum_sc_agg_exp, self.sc_agg_aff_profile_df,
-                                    result, self.picked_time, self.lr_df, self.st_tp, 
+                                    result, self.picked_time, self.lr_df, 
                                     p = self.p, T_HALF = self.repeat_penalty)
             # TODO del after test
             result.to_csv(f'{self.save_path}/result{i}.csv')

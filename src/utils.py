@@ -194,6 +194,26 @@ def check_st_sc_pair(st_adata, sc_adata):
         # sc_exp.columns = map(lambda x: str(x).upper(), sc_exp.columns)
         raise ValueError(
             f'The shared gene of ST and SC expression data is less than 10, check if they are of the same species.')
+    
+
+def check_sc(sc_adata, sc_ref):
+    '''
+    Check if sc_ref and sc_adata has zero row sum, if so remove them from sc_ref and sc_adata
+    '''
+    if (sc_ref.sum(axis=1) == 0).any():
+        idx = sc_ref[sc_ref.sum(axis=1) == 0].index
+        sc_ref = sc_ref.loc[~(sc_ref.sum(axis=1) == 0), :]
+        sc_adata = sc_adata[sc_ref.index, :]
+        print(f'Zero row sum found in sc_ref, {idx.tolist()} are therefore removed.')
+    if (sc_adata.X.sum(axis = 1) == 0).any():
+        boolean = sc_adata.X.sum(axis = 1)
+        nonzeros = boolean != 0
+        idx = sc_adata[~nonzeros].obs.index
+        sc_adata = sc_adata[nonzeros, :]
+        sc_ref = sc_ref.loc[sc_adata.obs.index, :]
+        print(f'Zero row sum found in sc_adata, {idx.tolist()} are therefore removed.')
+    return sc_adata, sc_ref
+
 ########## preprocessing ###################
 def pear(D,D_re):
     tmp = np.corrcoef(D.flatten(order='C'), D_re.flatten(order='C'))

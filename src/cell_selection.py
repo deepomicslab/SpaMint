@@ -171,16 +171,13 @@ def init_solution(cell_type_num, spot_idx, csr_st_exp, csr_sc_exp, meta_df, tran
     return picked_index, correlations, picked_time
 
 
-def reselect_cell(st_exp, st_coord, st_aff_profile_df, sc_exp, sc_meta, sum_sc_agg_exp, sc_agg_aff_profile_df, 
-                  init_sc_df, picked_time,lr_df, st_tp, p = 0.1,T_HALF = 10):
+def reselect_cell(st_exp, spots_nn_lst, st_aff_profile_df, sc_exp, sc_meta, sum_sc_agg_exp, sc_agg_aff_profile_df, 
+                  init_sc_df, picked_time,lr_df, p = 0.1,T_HALF = 10):
     '''
     Reselect cells from sc exp data for higher exp and interface correlation
     No repeat
     Runtime: 20s for each spot with 10 cells; 2s each cell.
     '''
-    st_dist = optimizers.findSpotNeighbor(st_coord,st_tp)
-    spots_nn_lst = dict(st_dist.apply(lambda x: x.index[x == 1].tolist(), axis=1))
-    # 
     tp_idx_dict = get_tp_idx_dict(sc_meta)
     new_spot_cell_dict = {}
     spot_idx_lst = list(st_exp.index)
