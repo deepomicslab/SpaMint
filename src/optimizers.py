@@ -8,6 +8,8 @@ from scipy.spatial import KDTree
 from scipy import sparse
 import scanpy as sc
 from sklearn.metrics import mean_squared_error
+import time
+import logging
 
 import umap
 import warnings
@@ -15,9 +17,23 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 
 from . import utils
 
+
+# TODO del after test
+def timeit(func):
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        logging.info(f'{func.__name__}\t{end - start} seconds')
+        return result
+    return wrapper
+
+
 def pear(D,D_re):
     tmp = np.corrcoef(D.flatten(order='C'), D_re.flatten(order='C'))
     return tmp[0,1] 
+
+
 
 def loss_adj(loss1,loss2,loss3,loss4,loss5):
     adj2 = loss1/loss2
@@ -26,6 +42,7 @@ def loss_adj(loss1,loss2,loss3,loss4,loss5):
     adj5 = loss1/loss5
     return adj2,adj3,adj4,adj5
 
+@timeit
 def cal_term1_old(alter_sc_exp,sc_meta,st_exp):
     '''
     1. First term, towards spot expression
@@ -45,12 +62,15 @@ def cal_term1_old(alter_sc_exp,sc_meta,st_exp):
     term1_df.index = alter_sc_exp.index
     loss_1 = mean_squared_error(st_exp,div_sc_spot)
     return term1_df,loss_1
-    
-def cal_term1(alter_sc_exp,sc_meta,st_exp,hvg,W_HVG):
+
+
+@timeit   
+def cal_term1(sc_exp,sc_meta,st_exp,hvg,W_HVG):
     '''
     1. First term, towards spot expression
     '''  
-    print('\t using hvg weighted version')
+    # add for merfish
+    alter_sc_exp = sc_exp[st_exp.columns].copy()
     # 1.1 Aggregate exp of chosen cells for each spot 
     alter_sc_exp['spot'] = sc_meta['spot']
     sc_spot_sum = alter_sc_exp.groupby('spot').sum()
@@ -74,9 +94,12 @@ def cal_term1(alter_sc_exp,sc_meta,st_exp,hvg,W_HVG):
     term1_df = term1_df.loc[sc_meta['spot']]
     term1_df.index = alter_sc_exp.index
     loss_1 = mean_squared_error(st_exp,div_sc_spot)
+    # add for merfish
+    term1_df = complete_other_genes(sc_exp, term1_df)
     return term1_df,loss_1
 
 
+@timeit
 def cal_term2(alter_sc_exp,sc_distribution):
     '''
     2. Second term, towards sc cell-type specific expression
@@ -88,15 +111,16 @@ def cal_term2(alter_sc_exp,sc_distribution):
     return term2_df,loss_2     
 
 
-def findSpotKNN(st_coord, st_tp): 
+@timeit
+def findSpotKNN_old(st_coord, st_tp): 
     # TODO
     # write on 1107 to replace findSpotNeighbor in the future
     # no need for slide-seq exceptions
     # for sc usage, moderate k? == further research
-    # 如果这么写就无法检测离群点了会不会有影响？
+    # 如果这么写就无法检测离群点了会不会有影响？==> 会影响到SC的nn，因为SC还是考虑离群点了
     coordinates = st_coord.values
     if st_tp != 'slide-seq':
-        k = 4
+        k = 6
     else:
         k = 6
     kdtree = KDTree(coordinates)
@@ -110,7 +134,42 @@ def findSpotKNN(st_coord, st_tp):
     return knn_dict
 
 
+def findSpotKNN(st_coord, st_tp):
+    # TODO
+    # write on 1107 to replace findSpotNeighbor in the future
+    # no need for slide-seq exceptions
+    # for sc usage, moderate k? == further research
+    thred = 95
+    total_sum = 0
+    coordinates = st_coord.values
+    if st_tp != 'slide-seq':
+        k = 6
+    else:
+        k = 6
+    kdtree = KDTree(coordinates)
+    distances, indices = kdtree.query(coordinates, k=k + 1)
+    # Autocalculate the outlier threshold based on the distances
+    threshold = np.percentile(distances[:, 1:], thred)
+    indices = pd.DataFrame(indices,index = st_coord.index)
+    distances = pd.DataFrame(distances,index = st_coord.index)
+    # print(threshold)
+    knn_dict = {}
+    spots_id = st_coord.index.tolist()
+    for key in spots_id:
+        nearest_neighbors = indices.loc[key, 1:]
+        nearest_distances = distances.loc[key, 1:]
+        # keep nn within threshold
+        filtered_neighbors = nearest_neighbors[nearest_distances <= threshold]
+        str_idx = [spots_id[index] for index in filtered_neighbors]
+        knn_dict[key] = str_idx
+        total_sum += len(str_idx)
+    print(f'By setting k as {k}, each spot has average {total_sum/st_coord.shape[0]} neighbors.')
+    return knn_dict
+
+
+# @timeit
 def findSpotNeighbor(st_coord,st_tp):
+    # old
     all_x = np.sort(list(set(st_coord.iloc[:,0])))
     delta_x = all_x[1] - all_x[0]
 
@@ -125,6 +184,8 @@ def findSpotNeighbor(st_coord,st_tp):
     st_dist[st_dist != 1] = 0
     return st_dist
 
+
+@timeit
 def findCellKNN(st_coord,st_tp,sc_meta,sc_coord,k): 
     '''
     st_tp = 'visum'
@@ -142,6 +203,7 @@ def findCellKNN(st_coord,st_tp,sc_meta,sc_coord,k):
         _, sc_coord_st = sc_prep(st_coord, sc_meta)
         # 1.2 find neighboring cells from adjacent spot
         sc_nn = findSpotNeighbor(sc_coord_st,st_tp)
+        # sc_nn = findSpotKNN(sc_coord_st,st_tp)
         # 1.3 calculate real cell-cell distance
         sc_dist = pd.DataFrame(distance_matrix(sc_coord,sc_coord),columns = sc_meta.index, index = sc_meta.index)
         # 2. One hop cross-spot neighbor within a threshold
@@ -167,11 +229,12 @@ def findCellKNN(st_coord,st_tp,sc_meta,sc_coord,k):
     return sc_knn
 
 
+@timeit
 def findCellKNN_slide(sc_meta,sc_coord):
-    # k=6+1 include self
+    # k=4+1 include self
     k = 7
-    # drop 90 out of 100
-    thred = 90
+    # drop 95 out of 100
+    thred = 95
     sum = 0
     sc_knn = {}
     for key in sc_meta.index.tolist():
@@ -180,6 +243,7 @@ def findCellKNN_slide(sc_meta,sc_coord):
     kdtree = KDTree(sc_coord)
     distances, indices = kdtree.query(sc_coord, k=k)
     threshold = np.percentile(distances[:, 1:], thred)
+    # print(threshold)
     indices = pd.DataFrame(indices,index = sc_meta.index)
     distances = pd.DataFrame(distances,index = sc_meta.index)
     for key in sc_meta.index.tolist():
@@ -195,6 +259,7 @@ def findCellKNN_slide(sc_meta,sc_coord):
     return sc_knn
 
 
+@timeit
 def apply_nsmallest(x, k, nn_dict):
     x = x.dropna(axis=1, how='all')
     for cell in x.columns:
@@ -203,6 +268,8 @@ def apply_nsmallest(x, k, nn_dict):
             nn_dict[cell].extend(x[cell].nsmallest(k).index.tolist())
     return nn_dict
 
+
+@timeit
 def complete_other_genes(alter_sc_exp, term_LR_df):
     '''
     Complete non-LR genes as zero for term3,4
@@ -211,6 +278,8 @@ def complete_other_genes(alter_sc_exp, term_LR_df):
     term_df.update(term_LR_df)
     return term_df
 
+
+@timeit
 def cal_term3(alter_sc_exp,sc_knn,aff,sc_dist,rl_agg):
     # v3 added norm_aff and norm rl_cp to regulize the values
     # v5 Updated the calculation of term3 with [ind], accelerated.
@@ -246,19 +315,25 @@ def cal_term3(alter_sc_exp,sc_knn,aff,sc_dist,rl_agg):
     term3_df = complete_other_genes(alter_sc_exp, term3_LR)
     return term3_df,loss
 
+
+@timeit
 def cal_aff_profile(exp, lr_df):
-    st_L = exp[lr_df[0]]
-    st_R = exp[lr_df[1]]
+    lr_df_align = lr_df[lr_df[0].isin(exp.columns) & lr_df[1].isin(exp.columns)].copy()
+    st_L = exp[lr_df_align[0]]
+    st_R = exp[lr_df_align[1]]
     st_LR_df = pd.concat([st_L * st_R.values[i] for i in range(st_R.shape[0])], keys=st_R.index.tolist())
     st_RL_df = pd.concat([st_R * st_L.values[i] for i in range(st_L.shape[0])], keys=st_L.index.tolist())
     st_aff_profile_df = st_LR_df + st_RL_df.values
     return st_aff_profile_df
 
+
+@timeit
 def cal_sc_aff_profile(cell, cell_n, exp, lr_df):
-    st_L1 = exp.loc[cell,lr_df[0]]
-    st_R1 = exp.loc[cell_n,lr_df[1]]
-    st_L2 = exp.loc[cell_n,lr_df[0]]
-    st_R2 = exp.loc[cell,lr_df[1]]
+    lr_df_align = lr_df[lr_df[0].isin(exp.columns) & lr_df[1].isin(exp.columns)].copy()
+    st_L1 = exp.loc[cell,lr_df_align[0]]
+    st_R1 = exp.loc[cell_n,lr_df_align[1]]
+    st_L2 = exp.loc[cell_n,lr_df_align[0]]
+    st_R2 = exp.loc[cell,lr_df_align[1]]
     #print(st_R2)
     #st_LR_df1 = pd.concat([st_L1 * st_R1.values[i] for i in range(st_R1.shape[0])], keys=st_R1.index.tolist())
     st_LR_df1 = st_R1 * st_L1.values
@@ -269,14 +344,18 @@ def cal_sc_aff_profile(cell, cell_n, exp, lr_df):
     st_aff_profile_df = st_LR_df1.values + st_LR_df2
     return st_aff_profile_df
 
+
 def apply_spot_cell(x):
     return x.index.tolist()
 
 
+@timeit
 def multiply_spots(df,res_tmp):
     spot_lst = df.index.get_level_values('spot').tolist()
     return df.multiply(res_tmp.loc[spot_lst].values,axis = 1)
 
+
+@timeit
 def calSumNNRL(exp, spot_knn_df, cell_neigbors, gene_lst):
     '''
     Calculating the multiplier in term 4
@@ -289,7 +368,9 @@ def calSumNNRL(exp, spot_knn_df, cell_neigbors, gene_lst):
     sum_ncg = tmp_sum_r.groupby(['spot','cell_idx']).mean()
     return sum_ncg
 
-def cal_term4(st_exp,sc_knn,st_aff_profile_df,alter_sc_exp,sc_meta,spot_cell_dict,lr_df):
+
+@timeit
+def cal_term4(st_exp,sc_knn,st_aff_profile_df,sc_exp,sc_meta,spot_cell_dict,lr_df):
     ''' 
     st_exp = obj_spex.st_exp
     sc_knn = obj_spex.sc_knn 
@@ -299,6 +380,7 @@ def cal_term4(st_exp,sc_knn,st_aff_profile_df,alter_sc_exp,sc_meta,spot_cell_dic
     spot_cell_dict = obj_spex.spot_cell_dict
     lr_df = obj_spex.lr_df
     '''
+    alter_sc_exp = sc_exp[st_exp.columns].copy()
     # generate knn_df: cell_idx	-> nn_cell_idx
     knn_df = pd.DataFrame(sc_knn.items(), columns=['cell_idx', 'nn_cell_idx'])
     knn_df = knn_df.explode('nn_cell_idx')
@@ -351,19 +433,20 @@ def cal_term4(st_exp,sc_knn,st_aff_profile_df,alter_sc_exp,sc_meta,spot_cell_dic
             term4_LR = pd.concat([term4_LR,res],axis =0)
         #break
     loss_4 /= n_knn
-    if np.isnan(loss_4):
-        print('nananananana')
-    term4_df = complete_other_genes(alter_sc_exp, term4_LR)
+    # if np.isnan(loss_4):
+    #     print('nananananana')
+    term4_df = complete_other_genes(sc_exp, term4_LR)
     return term4_df, loss_4
 
 
+@timeit
 def cal_term5(alter_sc_exp):
     term5_df = alter_sc_exp*2
     loss5 = np.mean((alter_sc_exp**2).values)
     return term5_df, loss5
 
 #### first edition ####
-
+@timeit
 def generate_LR_agg(alter_sc_exp,lr_df):
     ''' L(g1): g1 as Receptor
         R(g1): g1 as Ligand
@@ -396,7 +479,7 @@ def generate_LR_agg(alter_sc_exp,lr_df):
     return rl_agg
 
 
-
+@timeit
 def chunk_cal_aff(adata, sc_dis_mat, lr_df):
     genes = list(adata.columns)
     lr_df = lr_df[lr_df[0].isin(genes) & lr_df[1].isin(genes)]
@@ -436,6 +519,8 @@ def chunk_cal_aff(adata, sc_dis_mat, lr_df):
         #print(f'{process_i} done, cost {(b - a):.2f}s.')
     return affinitymat
 
+
+@timeit
 def sc_prep(st_coord, sc_meta):
     picked_sc_meta = sc_meta.copy()
     # broadcast_st_adj_sc
@@ -452,6 +537,8 @@ def sc_prep(st_coord, sc_meta):
     sc_coord = picked_sc_meta[['st_x','st_y']]
     return st_coord, sc_coord
 
+
+@timeit
 def sc_adj_cal(st_coord, picked_sc_meta,chunk_size = 12):
     alpha = 0
     st_coord, sc_coord = sc_prep(st_coord, picked_sc_meta)
@@ -478,6 +565,7 @@ def sc_adj_cal(st_coord, picked_sc_meta,chunk_size = 12):
         #break
     return st_coord, indicator, ans
 
+
 def coord_eva(coord, ans, chunk_size = 12):
     coord = np.array(coord)
     cor_all = 0
@@ -492,6 +580,7 @@ def coord_eva(coord, ans, chunk_size = 12):
     return cor_all/chunk_size
 
 
+@timeit
 def embedding(sparse_A, ans, path, left_range = 0, right_range = 30, steps = 30, dim = 2, verbose = False):
     aff = np.array(sparse_A, dtype = 'f')
     mask1 = (aff < 9e-300) & (aff >= 0)
@@ -528,6 +617,7 @@ def embedding(sparse_A, ans, path, left_range = 0, right_range = 30, steps = 30,
     return best_in_shape
 
 
+@timeit
 def calculate_affinity_mat(lr_df, data):
     '''
     This function calculate the affinity matrix from TPM and LR pairs.
@@ -564,6 +654,7 @@ def calculate_affinity_mat(lr_df, data):
     return affinitymat
 
 
+@timeit
 def aff_embedding(alter_sc_exp,st_coord,sc_meta,lr_df,save_path, left_range = 1, right_range = 2, steps = 1, dim = 2,verbose = False):
     # 3.1 prep initial embedding that term3 requires
     ordered_st_coord, sc_dis_mat, ans = sc_adj_cal(st_coord, sc_meta, chunk_size = 12)
@@ -579,6 +670,7 @@ def aff_embedding(alter_sc_exp,st_coord,sc_meta,lr_df,save_path, left_range = 1,
     return coord,ordered_st_coord,sparse_A,ans
 
 
+@timeit
 def get_hvg(adata):
     p_adata = sc.pp.normalize_total(adata, target_sum=1e4,copy = True)
     sc.pp.log1p(p_adata)
@@ -587,6 +679,7 @@ def get_hvg(adata):
     p_adata = p_adata[:, p_adata.var.highly_variable]
     # adata.layers["log"] = p_adataUMAP
     return set(p_adata.var_names)
+
 
 def center_shift_embedding(sc_coord, sc_meta_orig, max_dist):
     # added in v6

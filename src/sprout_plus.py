@@ -4,10 +4,25 @@ from anndata import AnnData
 from . import optimizers
 from . import utils
 from . import cell_selection
+from . import prep_data as prep
+
+import time
+import logging
 
 import pandas as pd
 import numpy as np
 import os
+
+# TODO del after test
+def timeit(func):
+    def wrapper(*args, **kwargs):
+        start = time.time()
+        result = func(*args, **kwargs)
+        end = time.time()
+        logging.info(f'{func.__name__}\t{end - start} seconds')
+        return result
+    return wrapper
+
 
 class SproutImpute:
     '''
@@ -48,6 +63,13 @@ class SproutImpute:
         1. Reform input, start from cell selection
         2. Add estimation of cell number per spot function inspired from cytospace
         3. Add repeat penalty for cell selection. If a cell have been selected over the threshold, lower its chosen probability.
+    SPROUT_impute_v10 2023/12/28
+        1. Fix bugs in cell selection processing slide-seq data (no neighbor found issue)
+        2. Release memory
+    SPROUT_impute_v11 2024/02/15
+        1. Adapt merfish data (less st gene)
+        2. Chage prep adata, if ST gene number is small, align with SC, fill with NA
+        
     st_tp: choose among either visum, st or slide-seq
 
     '''
@@ -65,7 +87,7 @@ class SproutImpute:
         self.st_tp = st_tp
         
 
-    def _check_params(self):
+    def _check_input(self):
         if not os.path.exists(self.save_path):
             os.makedirs(self.save_path)
 
@@ -79,17 +101,20 @@ class SproutImpute:
         utils.check_decon_type(self.weight, self.sc_adata, self.cell_type_key)
         print('Parameters checked!')
 
+    @timeit
     def prep(self):
         ######### init ############
         # 1. check input and parameters
-        self._check_params()
+        self._check_input()
         # 2. creat obj
         self.st_exp = self.st_adata.to_df()
         self.sc_exp = self.sc_adata.to_df()
         self.sc_meta = self.sc_adata.obs.copy()
+        del self.sc_adata
         # 3. generate obj
         # TODO redundant with feature selection in init
         self.svg = optimizers.get_hvg(self.st_adata)
+        del self.st_adata
         print('Getting svg genes')
         # 4. remove no neighbor spots
         spots_nn_lst = optimizers.findSpotKNN(self.st_coord,self.st_tp)
@@ -107,6 +132,8 @@ class SproutImpute:
         # self.spot_cell_dict = self.sc_meta.groupby('spot').apply(optimizers.apply_spot_cell).to_dict()
         self.st_aff_profile_df = optimizers.cal_aff_profile(self.st_exp, self.lr_df)
 
+
+    @timeit
     def select_cells(self, use_sc_orig = True, p = 0.1, mean_num_per_spot = 10, mode = 'strict', max_rep = 3, repeat_penalty = 10):
         self.repeat_penalty = repeat_penalty
         self.p = p
@@ -120,27 +147,10 @@ class SproutImpute:
             print(f'\t Estimating the cell number in each spot by the deconvolution result.')	
             spot_cell_num = cell_selection.estimate_cell_number(self.st_exp, mean_num_per_spot)
             self.num = cell_selection.randomization(self.weight,spot_cell_num)
-        self.sort_genes = cell_selection.feature_sort(self.sc_exp, degree = 2, span = 0.3)
-        self.lr_hvg_genes = cell_selection.lr_shared_top_k_gene(self.sort_genes, self.lr_df, k = 3000, keep_lr_per = 1)     
-        print(f'\t SpexMod selects {len(self.lr_hvg_genes)} feature genes.')
-        self.trans_id_idx = pd.DataFrame(list(range(self.sc_exp.shape[0])), index = self.sc_exp.index)
-        self.hvg_st_exp = self.st_exp.loc[:,self.lr_hvg_genes]
-        self.hvg_sc_exp = self.sc_exp.loc[:,self.lr_hvg_genes]
-        norm_hvg_st = cell_selection.norm_center(self.hvg_st_exp)
-        norm_hvg_sc = cell_selection.norm_center(self.hvg_sc_exp)
-        self.csr_st_exp = csr_matrix(norm_hvg_st)
-        self.csr_sc_exp = csr_matrix(norm_hvg_sc)
-        self.spot_cell_dict, self.init_cor, self.picked_time = cell_selection.init_solution(self.num, self.st_exp.index.tolist(),
-            self.csr_st_exp,self.csr_sc_exp,self.sc_meta[self.cell_type_key],self.trans_id_idx,self.repeat_penalty)
-        self.init_sc_df = cell_selection.dict2df(self.spot_cell_dict,self.st_exp,self.sc_exp,self.sc_meta)
-        self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.sc_exp,self.init_sc_df,self.st_exp)
-        self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df)
-        result = self.init_sc_df
-        # TODO del after test
-        self.picked_time.to_csv(f'{self.save_path}/init_picked_time.csv')
-        if use_sc_orig:
-            sc_exp_re = self.sc_exp
-            sc_meta_re = self.sc_meta
+
+        # if use_sc_orig:
+        #     sc_exp_re = self.sc_exp
+        #     sc_meta_re = self.sc_meta
         # TODO
         # else:
         #     # No original sc_exp, use sc_agg for cell selection
@@ -150,35 +160,71 @@ class SproutImpute:
         #     sc_meta_re.index = sc_meta_re['sc_id']
         #     sc_exp_re.index = sc_meta_re.index
         #     print('Using sc agg for cell re-selection.')
+            
+        # 1. subset sc_exp and st_exp by intersection genes
+        # add v11
+        self.filter_st_exp, self.filter_sc_exp = prep.subset_inter(self.st_exp, self.sc_exp)
+        # 2. feature selection
+        self.sort_genes = cell_selection.feature_sort(self.filter_sc_exp, degree = 2, span = 0.3)
+        self.lr_hvg_genes = cell_selection.lr_shared_top_k_gene(self.sort_genes, self.lr_df, k = 3000, keep_lr_per = 1)
+        print(f'\t SpexMod selects {len(self.lr_hvg_genes)} feature genes.')
+
+        # 3. scale and norm
+        self.trans_id_idx = pd.DataFrame(list(range(self.filter_sc_exp.shape[0])), index = self.filter_sc_exp.index)
+        self.hvg_st_exp = self.filter_st_exp.loc[:,self.lr_hvg_genes]
+        self.hvg_sc_exp = self.filter_sc_exp.loc[:,self.lr_hvg_genes]
+        norm_hvg_st = cell_selection.norm_center(self.hvg_st_exp)
+        norm_hvg_sc = cell_selection.norm_center(self.hvg_sc_exp)
+        self.csr_st_exp = csr_matrix(norm_hvg_st)
+        self.csr_sc_exp = csr_matrix(norm_hvg_sc)
+        # all lr that exp in st
+        self.lr_df_align = self.lr_df[self.lr_df[0].isin(self.filter_st_exp.columns) & self.lr_df[1].isin(self.filter_st_exp.columns)].copy()
+
+        # 4. init cell selection
+        self.spot_cell_dict, self.init_cor, self.picked_time = cell_selection.init_solution(self.num, self.filter_st_exp.index.tolist(),
+            self.csr_st_exp,self.csr_sc_exp,self.sc_meta[self.cell_type_key],self.trans_id_idx,self.repeat_penalty)
+        self.init_sc_df = cell_selection.dict2df(self.spot_cell_dict,self.filter_st_exp,self.filter_sc_exp,self.sc_meta)
+        self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.filter_sc_exp,self.init_sc_df,self.filter_st_exp)
+        self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df_align)
+        result = self.init_sc_df
+        # TODO del after test
+        self.picked_time.to_csv(f'{self.save_path}/init_picked_time.csv')
+        self.init_sc_df.to_csv(f'{self.save_path}/init_picked_res.csv')
+
+        # 5. reselect cells
         print('\t Swap selection start...')
         for i in range(max_rep):
-            self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.sc_exp,result,self.st_exp)
-            self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df)
-            result,self.picked_time = cell_selection.reselect_cell(self.st_exp, self.spots_nn_lst, self.st_aff_profile_df, 
-                                    sc_exp_re, sc_meta_re, self.sum_sc_agg_exp, self.sc_agg_aff_profile_df,
-                                    result, self.picked_time, self.lr_df, 
-                                    p = self.p, T_HALF = self.repeat_penalty)
+            self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.filter_sc_exp,result,self.filter_st_exp)
+            self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df_align)
+            result,self.picked_time = cell_selection.reselect_cell(self.filter_st_exp, self.spots_nn_lst, self.st_aff_profile_df, 
+                                    self.filter_sc_exp, self.sc_meta, self.sum_sc_agg_exp, self.sc_agg_aff_profile_df,
+                                    result, self.picked_time, self.lr_df_align, 
+                                    p = self.p, repeat_penalty = self.repeat_penalty)
             # TODO del after test
             result.to_csv(f'{self.save_path}/result{i}.csv')
             self.picked_time.to_csv(f'{self.save_path}/picked_time{i}.csv')
-        alter_sc_exp = sc_exp_re.loc[result['sc_id']]
-        alter_sc_exp.index = result.index
-        self.alter_sc_exp = alter_sc_exp
+
+        # 6. save result
+        self.alter_sc_exp = self.sc_exp.loc[result['sc_id']]
+        self.alter_sc_exp.index = result.index
         self.sc_agg_meta = result
         self.spot_cell_dict = self.sc_agg_meta.groupby('spot').apply(optimizers.apply_spot_cell).to_dict()
         return result
 
+
+    @timeit
     def run_gradient(self):
-        # v5
+        # 1. First term
         self.term1_df,self.loss1 = optimizers.cal_term1(self.alter_sc_exp,self.sc_agg_meta,self.st_exp,self.svg,self.W_HVG)
         print('First-term calculation done!')
+
+        # 2. Second term
         self.term2_df,self.loss2 = optimizers.cal_term2(self.alter_sc_exp,self.sc_ref)
         print('Second-term calculation done!')
-        '''
-        3. Third term, closer cells have larger affinity
-        '''
+
+        # 3. Third term, closer cells have larger affinity
         if not (self.st_tp == 'slide-seq' and hasattr(self, 'sc_knn')):
-            # if slide-seq and already have found sc_knn 
+            # if slide-seq and already have found sc_knn
             # dont do it again
             self.sc_dist = pd.DataFrame(distance_matrix(self.sc_coord,self.sc_coord), index = self.alter_sc_exp.index, columns = self.alter_sc_exp.index)
             # 3.2 get c' = N(c)
@@ -193,18 +239,18 @@ class SproutImpute:
         # 3.5 Calculate the derivative
         self.term3_df,self.loss3 = optimizers.cal_term3(self.alter_sc_exp,self.sc_knn,self.aff,self.sc_dist,self.rl_agg)
         print('Third term calculation done!')
-        '''
-        4. Fourth term, towards spot-spot affinity profile
-        '''
-        self.term4_df,self.loss4 = optimizers.cal_term4(self.st_exp,self.sc_knn,self.st_aff_profile_df,self.alter_sc_exp,self.sc_agg_meta,self.spot_cell_dict,self.lr_df)
+
+        # 4. Fourth term, towards spot-spot affinity profile
+        # self.rl_agg_align = optimizers.generate_LR_agg(self.alter_sc_exp,self.lr_df_align)
+        self.term4_df,self.loss4 = optimizers.cal_term4(self.st_exp,self.sc_knn,self.st_aff_profile_df,self.alter_sc_exp,
+                                                        self.sc_agg_meta,self.spot_cell_dict,self.lr_df_align)
         print('Fourth term calculation done!')
-        '''
-        5. Fifth term, norm2 regulization
-        '''
+        
+        # 5. Fifth term, norm2 regulization
         self.term5_df,self.loss5 = optimizers.cal_term5(self.alter_sc_exp)
         
 
-
+    @timeit
     def init_grad(self):
         if isinstance(self.init_sc_embed, pd.DataFrame):
             self.sc_coord = utils.check_sc_coord(self.init_sc_embed)
@@ -222,6 +268,7 @@ class SproutImpute:
         print('Hyperparameters adjusted.')
 
 
+    @timeit
     def gradient_descent(self, alpha, beta, gamma, delta, eta, 
                 init_sc_embed = False,
                 iteration = 20, k = 2, W_HVG = 2,
@@ -243,10 +290,15 @@ class SproutImpute:
         self.right_range = right_range
         self.steps = steps
         self.dim = dim
-        self.sc_ref = np.array(self.sc_ref.loc[self.sc_agg_meta['sc_id']])
-        print('Running v9 now...')
+        if not isinstance(self.sc_ref, np.ndarray):
+            self.sc_ref = np.array(self.sc_ref.loc[self.sc_agg_meta['sc_id']])
+        print('Running v11 now...')
         res_col = ['loss1','loss2','loss3','loss4','loss5','total']
         result = pd.DataFrame(columns=res_col)
+        if self.st_tp == 'slide-seq':
+            # cell coord as spot coord
+            self.init_sc_embed = self.st_coord.loc[self.sc_agg_meta['spot']]
+            self.init_sc_embed.index = self.sc_agg_meta.index
         self.init_grad()
         # loss = self.loss1 + self.ALPHA*self.loss2 + self.BETA*self.loss3 + self.GAMMA*self.loss4 + self.DELTA*self.loss5
         # tmp = pd.DataFrame(np.array([[self.loss1,self.ALPHA*self.loss2,self.BETA*self.loss3,self.GAMMA*self.loss4,self.DELTA*self.loss5,loss]]),columns = res_col, index = [0])
@@ -264,6 +316,7 @@ class SproutImpute:
             # TODO check
             self.alter_sc_exp[self.alter_sc_exp<0] = 0
             # v2 added 
+
             print(f'---{ite} self.loss4 {self.loss4} self.GAMMA {self.GAMMA} self.GAMMA*self.loss4 {self.GAMMA*self.loss4}')
             loss = self.loss1 + self.ALPHA*self.loss2 + self.BETA*self.loss3 + self.GAMMA*self.loss4 + self.DELTA*self.loss5
             tmp = pd.DataFrame(np.array([[self.loss1,self.ALPHA*self.loss2,self.BETA*self.loss3,self.GAMMA*self.loss4,self.DELTA*self.loss5,loss]]),columns = res_col, index = [ite])
@@ -273,6 +326,7 @@ class SproutImpute:
             print(f'---In iteration {ite}, the loss is:loss1:{self.loss1:.5f},loss2:{self.ALPHA*self.loss2:.5f},loss3:{self.BETA*self.loss3:.5f},', end="")
             print(f'loss4:{self.GAMMA*self.loss4:.5f},loss5:{self.DELTA*self.loss5:.5f}.')
             print(f'The total loss after iteration {ite} is {loss:.5f}.')
+
         ### v5 add because spatalk demo
         # TODO check
         self.alter_sc_exp[self.alter_sc_exp < 1] = 0  
@@ -286,5 +340,8 @@ class SproutImpute:
             _, sc_spot_center = optimizers.sc_prep(self.st_coord, self.sc_agg_meta)
             self.sc_agg_meta[['st_x','st_y']] = sc_spot_center
             self.sc_agg_meta = optimizers.center_shift_embedding(self.sc_coord, self.sc_agg_meta, max_dist = 1)
-        
+        else:
+            # v10
+            self.sc_agg_meta[['st_x','st_y']] = self.sc_coord
+            self.sc_agg_meta[['adj_spex_UMAP1','adj_spex_UMAP2']] = self.sc_coord
         return self.alter_sc_exp,self.sc_agg_meta

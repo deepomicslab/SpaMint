@@ -1,6 +1,9 @@
 import pickle
 import numpy as np
 import pandas as pd
+import time
+import logging
+
 
 def scale_01(x,a,b):
     MAX = np.max(x)
@@ -24,39 +27,6 @@ def load_object(filename):
     data = pickle.load(pkl_file)
     return data
 
-def check_positive(**params):
-    """Check that parameters are positive as expected
-    Raises
-    ------
-    ValueError : unacceptable choice of parameters
-    """
-    for p in params:
-        if params[p] <= 0:
-            raise ValueError(
-                "Expected {} > 0, got {}".format(p, params[p]))
-
-
-def check_int(**params):
-    """Check that parameters are integers as expected
-    Raises
-    ------
-    ValueError : unacceptable choice of parameters
-    """
-    for p in params:
-        if not isinstance(params[p], int):
-            raise ValueError(
-                "Expected {} integer, got {}".format(p, params[p]))
-
-def check_num(**params):
-    """Check that parameters are numeric as expected
-    Raises
-    ------
-    ValueError : unacceptable choice of parameters
-    """
-    for p in params:
-        if not params[p].isnumeric():
-            raise ValueError(
-                "Expected {} numeric, got {}".format(p, params[p]))
 
 def check_index_str(st_adata, sc_adata, sc_ref,weight):
     if st_adata.obs.index.dtype != 'object':
@@ -118,13 +88,6 @@ def check_empty_dict(mydict):
             "No cell has neighbor, check parameter st_tp")
 
 
-# def convert_str_int_tp(sc_meta,tp_columns):
-#     sc_meta1 = sc_meta.copy()
-#     tp_array = sc_meta[tp_columns]
-#     tp_uniq = pd.DataFrame(set(tp_array))[0]
-#     idx_dict = {k: v for v, k in enumerate(tp_uniq)}
-#     sc_meta1['num_tp'] = sc_meta1[tp_columns].map(idx_dict)
-#     return sc_meta1['num_tp']
 
 def align_lr_gene(self):
     lr_df = self.lr_df
@@ -199,6 +162,7 @@ def check_st_sc_pair(st_adata, sc_adata):
 def check_sc(sc_adata, sc_ref):
     '''
     Check if sc_ref and sc_adata has zero row sum, if so remove them from sc_ref and sc_adata
+    Check if sc_ref and sc_adata has same genes, if not remove them from sc_ref and sc_adata
     '''
     if (sc_ref.sum(axis=1) == 0).any():
         idx = sc_ref[sc_ref.sum(axis=1) == 0].index
@@ -212,6 +176,15 @@ def check_sc(sc_adata, sc_ref):
         sc_adata = sc_adata[nonzeros, :]
         sc_ref = sc_ref.loc[sc_adata.obs.index, :]
         print(f'Zero row sum found in sc_adata, {idx.tolist()} are therefore removed.')
+    if not sc_ref.columns.equals(sc_adata.var_names.to_list()):
+        genes = set(sc_adata.var_names).intersection(set(sc_ref.columns))
+        if len(genes) == 0:
+            raise ValueError(
+                f'sc_ref and sc_adata has different genes, no shared genes found.')
+        else:
+            sc_ref = sc_ref[list(genes)]
+            sc_adata = sc_adata[:,sc_ref.columns]
+        print(f'sc_ref and sc_adata has different genes, both data are subset to {sc_adata.shape[1]} genes.')
     return sc_adata, sc_ref
 
 ########## preprocessing ###################
@@ -233,4 +206,6 @@ def check_decon_type(weight, sc_adata, cell_type_key):
     if len(set(weight.columns).intersection(set(sc_adata.obs[cell_type_key]))) != len(set(weight.columns)):
         raise ValueError(
             f'Cell type in weight matrix is different from single-cell meta file.')
+
+
 
