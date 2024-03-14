@@ -24,7 +24,7 @@ def timeit(func):
     return wrapper
 
 
-class SproutImpute:
+class spaMint:
     '''
     @author: Jingwan WANG
     Created on 2022/11/09

@@ -1,8 +1,9 @@
 import pickle
 import numpy as np
 import pandas as pd
-import time
-import logging
+# import time
+# import logging
+import os
 
 
 def scale_01(x,a,b):
@@ -10,6 +11,7 @@ def scale_01(x,a,b):
     MIN = np.min(x)
     res = (b-a)*(x-MIN)/(MAX-MIN)+a
     return res
+
 
 def scale_global_MIN_MAX(df,MIN,MAX):
     df_max = df.max().max()
