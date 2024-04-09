@@ -9,14 +9,15 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib as mpl
 mpl.rcParams['pdf.fonttype'] = 42
-# from matplotlib_venn import venn2
+from . import evaluation as eva
+from matplotlib_venn import venn2
 # from matplotlib_venn import venn3
 # import plotly.express as px
 # import math
 # from . import utils
 
 def sc_celltype(adata, color_map = None, tp_key = 'celltype', 
-            subset_idx = None, legend = False, figsize = (4,4),
+            subset_idx = None, legend = False, figsize = (4,4), rect = False,
             savefig = False, size = 10, alpha = 0.8,title = None,theme = 'white'):
     '''
     @ Wang Jingwan 0314
@@ -51,6 +52,18 @@ def sc_celltype(adata, color_map = None, tp_key = 'celltype',
                             s = 5,alpha = 1,palette=['#cccccc'],edgecolor = None)
             sns.scatterplot(data=subset_data.loc[subset_idx], x=cols[0], y=cols[1],hue = 'subset', 
                             s = size+5,alpha = alpha,palette=color_map,edgecolor = None)
+            if rect: 
+                if isinstance(rect, bool):
+                    x_min,y_min = subset_data.loc[subset_idx][cols].min()
+                    x_max,y_max = subset_data.loc[subset_idx][cols].max()
+                elif isinstance(rect, list):
+                    x_min,y_min = rect[0]
+                    x_max,y_max = rect[1]
+                rect_width = x_max - x_min  # Width of the rectangle
+                rect_height = y_max - y_min  # Height of the rectangle
+                rect_color = 'red'  # Rectangle color 
+                rectangle = plt.Rectangle((x_min, y_min), rect_width, rect_height, fill=False, color=rect_color, linewidth=2)
+                plt.gca().add_patch(rectangle)
         if legend:
             if sc_agg_meta[tp_key].nunique() > 30:
                 ncol = 2
@@ -61,7 +74,7 @@ def sc_celltype(adata, color_map = None, tp_key = 'celltype',
             handles_labels_sorted = sorted(zip(handles, labels), key=lambda x: (x[1] == "Other cells", x[1]))
             handles_sorted, labels_sorted = zip(*handles_labels_sorted)
             # Create a new legend with the sorted handles and labels
-            leg = plt.legend(handles_sorted, labels_sorted,loc='center left', bbox_to_anchor=(0.95, 0.5),
+            leg = plt.legend(handles_sorted, labels_sorted,loc='center left', bbox_to_anchor=(0.99, 0.5),
                              ncol=ncol, handletextpad=0.5,columnspacing=0.4,labelspacing=0.1,
                              fontsize = 16,markerscale = 2,handlelength = 0.5)
             leg.get_frame().set_linewidth(0.0)  # Remove legend frame
@@ -109,7 +122,7 @@ def decide_figsize(x = None, y = None,unit = 4):
     return ROW_L,COL_L
 
 
-def sc_subtype(adata,color_map = None,tp_key = 'celltype', target_tp = None, 
+def sc_subtype(adata,color_map = None,tp_key = 'celltype', target_tp = None, size = 20,
                    theme_white = True, savefig = False, COL = None, hue = None):
     sc_agg_meta = adata.obs.copy()
     if hue is None:
@@ -150,10 +163,10 @@ def sc_subtype(adata,color_map = None,tp_key = 'celltype', target_tp = None,
         with sns.axes_style("white"):
             plt.subplot(ROW, COL, i + 1)
             sns.scatterplot(data=sc_agg_meta[[st_cols[0],st_cols[1],'pivot']].drop_duplicates(), x=st_cols[0], y=st_cols[1],hue = hue, 
-                        s = 20,alpha = 0.8,palette=['#ccc'],edgecolor = None
+                        s = size,alpha = 0.8,palette=['#ccc'],edgecolor = None
                         )
             sns.scatterplot(data=sc_agg_meta[sc_agg_meta[tp_key] == tp], x=cols[0], y=cols[1],hue = hue, 
-                            s = 20,alpha = 0.8,palette=[color_map[tp]],edgecolor = None
+                            s = size,alpha = 0.8,palette=[color_map[tp]],edgecolor = None
                             )
             if theme_white:
                 plt.legend([],[], frameon=False)  
@@ -234,7 +247,7 @@ def exp_violin(adata, gene=None, tp_key=None, types=None,
                palette_dict=None, test='t-test_ind',
                highlight=[], log=True, scale=True,
                figsize=(6, 4), x_rotate=False,
-               savefig = False, title=''):
+               savefig=False, title=''):
     from statannotations.Annotator import Annotator
     from itertools import combinations
     df = adata[:, gene].to_df()
@@ -246,18 +259,20 @@ def exp_violin(adata, gene=None, tp_key=None, types=None,
         df = (df - df.mean()) / df.std()
 
     df = pd.concat((df, adata.obs[tp_key]), axis=1)
-    df = df[df[tp_key].isin(types)]
-
+    if types:
+        df = df[df[tp_key].isin(types)]
+        print(df.head(5))
+        print(types)
     plt.figure(figsize=figsize)
     ax = sns.violinplot(data=df, x=tp_key, y=gene,
                         order=types, palette=palette_dict,
-                        linewidth=.9, cut = 0, scale = 'width')
+                        linewidth=.9, cut=0, scale='width')
     if highlight:
         pairs = [(cell_type1, cell_type2) for cell_type1 in highlight for cell_type2 in types if cell_type1 != cell_type2]
     else:
         pairs = list(combinations(types, 2))
 
-    annot = Annotator(ax, pairs, x=tp_key, y=gene, data=df)
+    annot = Annotator(ax, pairs, x=tp_key, y=gene, data=df,order = types)
     annot.configure(test=test, comparisons_correction="BH", correction_format="replace")
     annot.apply_test()
     annot.annotate()
@@ -305,10 +320,20 @@ def highlight_x(draw_df, x, x_highlight):
             xtick_label.set_color('red')
 
 
+# def cal_even_div_legend(draw_df, hue = None, div_num = 3):
+#     start = draw_df[hue].min()
+#     end = draw_df[hue].max()
+#     # Calculate the section size
+#     section_size = (end - start) / div_num
+#     # Calculate the three numbers in the sections
+#     hue_numbers = np.linspace(start + section_size, end - section_size, 3)
+#     return hue_numbers
+
+
 def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highlight=None, 
                 savefig=None, figsize=None, legend=False, xrotate=False,
                 showlabel=False, xlabel = None, ylabel = None, title=None, 
-                  cmap='viridis',hue='Count', size='GeneRatio'):
+                  cmap='viridis',hue='Count', size='GeneRatio',vmin = None, vmax = None):
     '''
     Red label item in x, y axis
     highlight = 'T_cells_CD4+'
@@ -330,10 +355,10 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
     # print(width,height)
     with sns.axes_style("whitegrid"):
         plt.figure(figsize=(width, height))
-        sns.scatterplot(data=draw_df, x=x, y=y, hue = hue, 
-                        legend=legend,
-                        palette=cmap, 
-                        size=size, sizes=(50, 300)
+        ax = sns.scatterplot(data = draw_df, x = x, y = y, hue = hue, 
+                        legend = legend,
+                        palette = cmap, 
+                        size = size, sizes = (50,300)
                         )
         
         highlight_x(draw_df, x, x_highlight)
@@ -341,6 +366,32 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
 
         plt.yticks(fontsize=16)
         plt.xticks(fontsize=16)
+
+        if legend:
+            sizes = np.percentile(draw_df[size], [25, 50, 75, 100])
+            sizes = np.round(sizes, 2)
+            labels = np.percentile(range(50,300), [25, 50, 75, 100])
+            labels = np.round(labels, 0)
+            print(labels)
+            legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+                            markerfacecolor='black', markersize=labels[i]/20, label=sizes[i]) 
+                            for i in range(len(sizes))]
+            plt.legend(handles=legend_elements, title=size, title_fontsize=14, loc='center left', bbox_to_anchor=(1.25, 0.5), 
+                       fontsize=14, handlelength = 0.5, handletextpad=0.5,labelspacing=0.2)
+        
+            import matplotlib.colors
+            if vmin:
+                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            else:
+                norm = matplotlib.colors.Normalize(vmin=min(draw_df[hue]), vmax=max(draw_df[hue]))
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            # plt.colorbar(sm)
+            colorbar = plt.colorbar(sm, shrink=0.6)
+            colorbar.ax.set_title(hue,fontsize = 14)
+
+
+
         if showlabel == False:
             plt.xlabel('')
             plt.ylabel('')
@@ -361,10 +412,8 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
         if xrotate:
             plt.xticks(rotation=90)
 
-        if legend:
-            plt.legend(loc='center left', bbox_to_anchor=(1.0, 0.5),fontsize=14)
-
-        plt.xlim(-0.5, len(draw_df[x].unique())-0.5)    
+        plt.xlim(-0.5, len(draw_df[x].unique())-0.5) 
+        plt.ylim(len(draw_df[y].unique())-0.5,-0.5)   
         # if len(draw_df[x].unique()) == 2:
         #     plt.xlim(-0.5, 1.5)
         #     # plt.ylim(10, -0.8)
@@ -377,9 +426,12 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
 
 
 
-def celltype_cci(adata, is_sender_per = True, figsize = (3.6,3.6), y_highlight='', x_highlight='',
+
+def celltype_cci(adata, is_sender_per = True, figsize = (3.6,3.6), 
+                 target_sender = None, target_receiver = None, y_highlight='', x_highlight='',
                 cmap = 'Reds', hue = 'LRI',showlabel = True,
-                size = 'CCI',xrotate = True,legend = True,
+                vmin = None, vmax = None,
+                size = 'CCI',xrotate = True, legend = True,
                 savefig = False, title = ''):
     '''
     is_sender_per: if True, use the cci percentage file that sender row sum is 1 [send_per].
@@ -390,13 +442,15 @@ def celltype_cci(adata, is_sender_per = True, figsize = (3.6,3.6), y_highlight='
     else:
         df = adata.uns['rec_per']
         name = 'receiver'
-    
+    # TODO move lri here, to subset 
+    draw_df = eva.generate_tp_lri(adata,df,target_sender,target_receiver)
     if savefig:
         save_path = adata.uns['figpath']
         savefig = f'{save_path}/{name}_CCI.pdf'
     
-    draw_bubble(df, x='Receiver', y='Sender', x_highlight = x_highlight, y_highlight=y_highlight,
+    draw_bubble(draw_df, x='Receiver', y='Sender', x_highlight = x_highlight, y_highlight=y_highlight,
                     savefig = savefig, title = title, figsize = figsize, legend = legend,
+                    vmin = vmin, vmax = vmax,
                     showlabel = showlabel, xrotate = xrotate, cmap=cmap, hue=hue, size=size)
     
 
@@ -437,15 +491,23 @@ def clustermap(df, index = 'ligand', col = 'receptor', value = 'lr_co_exp_num',
         legend_label = f'{value}'
 
     clustermap = sns.clustermap(n_tp_lri,row_cluster=row_cluster,col_cluster=col_cluster,
-               standard_scale=None,dendrogram_ratio=0.001,square = True,cmap = cmap,
-               figsize=figsize, cbar_pos=(1, 0.5, 0.02, 0.2),cbar_kws={'orientation': 'vertical','label':legend_label})
+               standard_scale=None,dendrogram_ratio=0.001,cmap = cmap,
+               figsize=figsize, cbar_pos=(1.2, 0.5, 0.02, 0.2),cbar_kws={'orientation': 'vertical','label':legend_label})
     if not xticks:
         clustermap.ax_heatmap.set_xticklabels([])
         clustermap.ax_heatmap.set_xticks([])
+    else:
+        clustermap.ax_heatmap.xaxis.label.set_size(18)
+        clustermap.ax_heatmap.xaxis.set_tick_params(labelsize=16)
+
     
     if not yticks:
         clustermap.ax_heatmap.set_yticklabels([])
         clustermap.ax_heatmap.set_yticks([])
+    else:
+        clustermap.ax_heatmap.yaxis.label.set_size(18)
+        clustermap.ax_heatmap.yaxis.set_tick_params(labelsize=16)
+
 
     if highlight is not None:
         arr = n_tp_lri.index.to_list()
@@ -464,16 +526,19 @@ def clustermap(df, index = 'ligand', col = 'receptor', value = 'lr_co_exp_num',
 
     if savefig:
         plt.savefig(f'{savefig}')
-    
+
+    plt.xticks(fontsize=16)
+    plt.yticks(fontsize=16)
+
 
     plt.show()
 
 
-def lri_heatmap(adata, target_sender = [], target_receiver = [], title = None, 
+def lri_heatmap(adata, target_sender = [], target_receiver = [], title = None, unique_lri = False,
                 figsize = (8,3), log = True, row_cluster = True, col_cluster = False,
-                highlight = None, cmap = 'Reds',cellTypeAsCol = True,
+                highlight_lri = None, cmap = 'Reds',cellTypeAsCol = True,
                 xticks = True, yticks = True,savefig = False):
-    
+
     lri_df = adata.uns['spatalk']
     if len(target_sender) == 0:
         target_sender = lri_df['celltype_sender'].unique()
@@ -482,7 +547,24 @@ def lri_heatmap(adata, target_sender = [], target_receiver = [], title = None,
         target_receiver = lri_df['celltype_receiver'].unique()
         
     lri_df = lri_df[lri_df['celltype_sender'].isin(target_sender) & lri_df['celltype_receiver'].isin(target_receiver)].copy()
-    
+    if unique_lri:
+        df = lri_df.groupby('LRI').count()
+        uniq_lri = df[df['ligand'] == 1].index.tolist()
+        if isinstance(unique_lri,bool):
+            uniq_count_thred = np.round(df["ligand"].mean())
+        elif isinstance(unique_lri,int):
+            uniq_count_thred = unique_lri
+        else:
+            raise ValueError('unique_lri should be bool or int')
+        loose_uniq_lri = df[df['ligand'] <= uniq_count_thred].index.tolist()
+        lri_df = lri_df[lri_df['LRI'].isin(loose_uniq_lri)].copy()
+        if uniq_count_thred>1:
+            highlight = uniq_lri + (highlight_lri or [])
+        else:
+            highlight = highlight_lri
+    else:
+        highlight = highlight_lri
+
     if savefig:
         save_path = adata.uns['figpath']
         savefig = f'{save_path}/{title}_LRI_co_exp_heatmap.pdf'
@@ -511,12 +593,9 @@ def top_kegg_enrichment(adata, top_n = 10, groupby_sender = False,
     lig_gene = 'L' if use_lig_gene else 'n'
     rec_gene = 'R' if use_rec_gene else 'n'
     used_genes = f'{lig_gene}_{rec_gene}'
-
     kegg_res = kegg_res[kegg_res['celltype_sender'].isin(target_sender) & 
                         kegg_res['celltype_receiver'].isin(target_receiver) & 
                         (kegg_res['used_genes'] == used_genes)]
-    # print(kegg_res.head(5))
-
     if groupby_sender:
         show_row = 'celltype_sender'
         xlabel = 'Sender'
@@ -551,7 +630,7 @@ def top_kegg_enrichment(adata, top_n = 10, groupby_sender = False,
 
 
 
-def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred = 5,
+def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred = 5, top_n_each = 999,
                 target_sender = [], target_receiver = [], target_path = '', 
                 use_lig_gene = True, use_rec_gene = True,
                 savefig = False, show_title = True,
@@ -582,7 +661,7 @@ def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred =
         path_genes.extend(tmp_genes)
     path_genes = list(set(path_genes))
     if (lig_gene == 'L') and (rec_gene == 'R'):
-        target_df = lri_df[lri_df['ligand'].isin(path_genes) | lri_df['receptor'].isin(path_genes)]
+        target_df = lri_df[lri_df['ligand'].isin(path_genes) & lri_df['receptor'].isin(path_genes)]
     elif (lig_gene == 'L') and (rec_gene == 'n'):
         target_df = lri_df[lri_df['ligand'].isin(path_genes)]
     elif (lig_gene == 'n') and (rec_gene == 'R'):
@@ -591,6 +670,8 @@ def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred =
         raise ValueError('Both use_lig_gene and use_rec_gene are False. No gene used.')
     
     target_df = target_df[target_df[value]>thred].copy()
+    target_df = target_df.groupby('CCI').apply(lambda x: x.nlargest(top_n_each, value)).reset_index(drop=True)
+
     if savefig:
         save_path = adata.uns['figpath']
         savefig = f'{save_path}/LRI_{target_path}_heatmap.pdf'
@@ -617,6 +698,53 @@ def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred =
 
 
 
+def keggPaths_lri_flow(adata,target_sender = [], target_receiver = [], target_path = [], 
+                use_lig_gene = True, use_rec_gene = True,value = 'lr_co_exp_num', thred = 5, top_n_each = 5):
+    kegg_res = adata.uns['kegg_enrichment']
+    lri_df = adata.uns['spatalk']
+
+    lig_gene = 'L' if use_lig_gene else 'n'
+    rec_gene = 'R' if use_rec_gene else 'n'
+    used_genes = f'{lig_gene}_{rec_gene}'
+
+    kegg_res = kegg_res[kegg_res['celltype_sender'].isin(target_sender) & 
+                        kegg_res['celltype_receiver'].isin(target_receiver) & 
+                        (kegg_res['used_genes'] == used_genes) &
+                        (kegg_res['Description'].isin(target_path))]
+    if len(kegg_res) == 0:
+        raise ValueError(f'No {target_path} found in the enrichment result.')
+    
+    lri_df = lri_df[lri_df['celltype_sender'].isin(target_sender) &
+                    lri_df['celltype_receiver'].isin(target_receiver)]
+    
+    
+    all_target_df = pd.DataFrame()
+    for path in target_path:
+        path_genes = []
+        tmp_kegg = kegg_res[kegg_res['Description'] == path]
+        tmp_genes = tmp_kegg['geneSymbol'].values
+        for _, row in tmp_kegg.iterrows():
+            tmp_genes = row['geneSymbol'].split('/')
+            # print(len(tmp_genes))
+            path_genes.extend(tmp_genes)
+        path_genes = list(set(path_genes))
+        print(len(path_genes))
+        if (lig_gene == 'L') and (rec_gene == 'R'):
+            target_df = lri_df[lri_df['ligand'].isin(path_genes) | lri_df['receptor'].isin(path_genes)].copy()
+        elif (lig_gene == 'L') and (rec_gene == 'n'):
+            target_df = lri_df[lri_df['ligand'].isin(path_genes)].copy()
+        elif (lig_gene == 'n') and (rec_gene == 'R'):
+            target_df = lri_df[lri_df['receptor'].isin(path_genes)].copy()
+        target_df['pathway'] = path
+        all_target_df = pd.concat([all_target_df,target_df])
+    all_target_df = all_target_df[all_target_df[value]>thred].copy()
+    all_target_df = all_target_df.groupby(['CCI','pathway']).apply(lambda x: x.nlargest(top_n_each, value)).reset_index(drop=True)
+    all_target_df = all_target_df[['LRI','ligand','receptor','pathway']].drop_duplicates()
+    return all_target_df
+
+
+
+
 def draw_lr_flow2(df, left_panel = 'ligand', right_panel = 'receptor',
                  figsize = (10,10)):
     import plotly.graph_objects as go
@@ -636,7 +764,7 @@ def draw_lr_flow2(df, left_panel = 'ligand', right_panel = 'receptor',
             thickness=20,
             line=dict(color='black', width=0.1),
             label=labels,
-            color=['#EFA2B5']*len(ligs) + ['#9DCD82']*len(recs)
+            color=["#F56867"]*len(ligs) + ["#3A84E6"]*len(recs)
         ),
         link=dict(
             source=source, # indices correspond to labels, eg A1, A2, A1, B1 
@@ -681,6 +809,7 @@ def draw_lr_flow3(df, left_panel = 'ligand', mid_panel = 'receptor', right_panel
     print('source1',source1)
     print('target1',target1)
     print('target2',target2)
+    print([0.1]*len(ligs) + [0.2]*len(recs) + [10]*len(paths))
     value = [np.random.randint(1, 2) for _ in range((len(source)))]
     trace = go.Sankey(
         node=dict(
@@ -688,7 +817,10 @@ def draw_lr_flow3(df, left_panel = 'ligand', mid_panel = 'receptor', right_panel
             thickness=20,
             line=dict(color='black', width=0.1),
             label=labels,
-            color=["#F56867"]*len(ligs) + ["#3A84E6"]*len(recs) + ["#59BE86"] *len(paths)
+            color=["#F56867"]*len(ligs) + ["#3A84E6"]*len(recs) + ["#59BE86"] *len(paths),
+            x = [0.1]*len(ligs) + [0.3]*len(recs) + [0.9]*len(paths),
+            # y = [0.1]*len(ligs) + [0.1]*len(recs) + [0.1]*len(paths),
+            # y = [0.5]*len(ligs) + [0.5]*len(recs) + [0.5]*len(paths),
         ),
         link=dict(
             source=source, # indices correspond to labels, eg A1, A2, A1, B1 
@@ -703,9 +835,305 @@ def draw_lr_flow3(df, left_panel = 'ligand', mid_panel = 'receptor', right_panel
     )
     # create figure
     fig = go.Figure(data=[trace], layout=layout)
+    print(fig.data[0]['node']['x'])
+    print(fig.data[0]['node']['y'])
     width = figsize[0]*100
     height = figsize[1]*100
     fig.update_layout(width=width, height=height)
     # fig.write_image(f'./8.Ref/figures/main/lr_network.pdf') 
     fig.show()
-    return
+
+
+
+def spatial_gene_exp(adata, gene = None,method = None,group = None,
+                     log=True,scale = True,
+                     hl_type = [], tp_key = 'celltype', rect = False,
+                theme_white = True, legend = True, figsize = (3.4, 2.6),):
+    
+    exp = adata.to_df()
+    meta = adata.obs
+    # if gene is list
+    if isinstance(gene, list):
+        tmp = exp[gene].sum(axis = 1)
+        exp[group] = tmp
+        gene = group
+
+    cmap = plt.cm.plasma
+    cmap = plt.cm.gnuplot2
+
+    # last_color = cmap.colors[0]
+    last_color = 'black'
+    data = pd.DataFrame(exp[gene],columns=[gene],index = exp.index)
+
+    if log == True:
+        data = pd.DataFrame(np.log(data+1),columns=[gene],index = exp.index)
+
+    if scale == True:
+        data = data.apply(lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)))
+
+    if 'adj_spex_UMAP1' in meta.columns:
+        cols = ['adj_spex_UMAP1','adj_spex_UMAP2']
+        size = 10
+    elif 'adj_UMAP1' in meta.columns:
+        cols = ['adj_UMAP1','adj_UMAP2']
+        size = 10
+    else:
+        cols = ['x','y']
+        size = 20
+
+    data = pd.concat((data,meta[cols]),axis = 1)
+    plt.figure(figsize=figsize)
+    if hl_type:
+        hl_idx = adata.obs[adata.obs[tp_key].isin(hl_type)].index
+        sub_data = data.loc[hl_idx].copy()
+        bg_data = data[~data.index.isin(hl_idx)] 
+        with sns.axes_style("white"):
+            plt.scatter(x=bg_data[cols[0]], y=bg_data[cols[1]],
+                        s=size, linewidth=False, color = '#ccc')
+            plt.scatter(x=sub_data[cols[0]], y=sub_data[cols[1]], c=sub_data[gene], 
+                        s=size+5, linewidth=False, cmap=cmap)
+            plt.title(f'{method} {gene} of {" ".join(hl_type)}', fontsize=22)
+            if rect: 
+                x_min,y_min = sub_data[cols].min()
+                x_max,y_max = sub_data[cols].max()
+                rect_width = x_max - x_min  # Width of the rectangle
+                rect_height = y_max - y_min  # Height of the rectangle
+                rect_color = 'red'  # Rectangle color 
+                rectangle = plt.Rectangle((x_min, y_min), rect_width, rect_height, fill=False, color=rect_color, linewidth=2)
+                plt.gca().add_patch(rectangle)
+    else:
+        bg_data = data[data[gene] <= 0] 
+        if len(bg_data) > 1:
+            with sns.axes_style("white"):
+                plt.scatter(x=bg_data[cols[0]], y=bg_data[cols[1]], 
+                            s=size, linewidth=False, color = last_color) 
+            # Filter the data where gene is not equal to 0
+                filtered_data = data[data[gene] > 0]
+        else:
+            filtered_data = data
+        with sns.axes_style("white"):
+            plt.scatter(x=filtered_data[cols[0]], y=filtered_data[cols[1]], c=filtered_data[gene], 
+                        s=size, linewidth=False, cmap=cmap)
+            plt.title(f'{method} {gene}',fontsize=22)
+
+    if legend == True:
+        plt.colorbar(ticks = [0,1], label = 'Standardized expression')
+    plt.axis('equal')
+
+    if theme_white:
+        plt.legend([],[], frameon=False)  
+        sns.despine(left=True, bottom=True)
+        plt.tick_params(left=False, bottom=False, top = False, right = False)
+        plt.tight_layout()
+        sns.despine(left=True, bottom=True)
+        plt.xlabel('',fontsize=16)
+        plt.ylabel('',fontsize=16)
+        plt.xticks([],fontsize=14)
+        plt.yticks([],fontsize=14)
+    else:
+        plt.tick_params(left=False, bottom=False, top = False, right = False)
+        plt.tight_layout()
+        # sns.despine(left=True, bottom=True)
+        plt.xlabel('',fontsize=16)
+        plt.ylabel('',fontsize=16)
+        plt.xticks([],fontsize=14)
+        plt.yticks([],fontsize=14)
+    plt.show()
+
+
+
+def patterns(adata, savefig = False, cmap = None, COL = None):
+    import re
+    pattern = adata.uns['pattern']
+    p_names = [col for col in pattern.columns if re.match(r'^\d+$', col)]
+    if COL is None:
+        ROW = int(np.floor(np.sqrt(len(p_names))))
+        COL = int(np.ceil(len(p_names) / ROW))
+        ROW = ROW * 3
+    else:
+        ROW = int(np.ceil(len(p_names) / COL)) *3
+    ROW_L = 3
+    COL_L = 4
+    plt.figure(figsize=(COL_L * COL, ROW_L * ROW))
+    i = 0
+    colname = ['adj_spex_UMAP1', 'adj_spex_UMAP2']
+    size = 5
+    df = adata.obs
+    for p in p_names:
+        plt.subplot(ROW, COL, i + 1)
+        plt.scatter(df[colname[0]], df[colname[1]], c=pattern[str(p)], s=size,cmap = cmap)
+        plt.axis('equal')
+        plt.title(f'Pattern {p}',fontsize=22)
+        plt.colorbar(ticks = [0,1],label = 'Standardized expression')
+        plt.xticks(fontsize=16)
+        plt.yticks(fontsize=16)
+        i += 1
+        plt.subplots_adjust(wspace=0.25,hspace=0.5)
+    if savefig:
+        if isinstance(savefig,str):
+            if '/' in savefig:
+                savefig = f'{savefig}'
+            else:
+                save_path = adata.uns['figpath']
+                savefig = f'{save_path}/{savefig}'
+        else:
+            save_path = adata.uns['figpath']
+            savefig = f'{save_path}/patterns.pdf'
+        plt.savefig(f'{savefig}')
+
+
+def celltype_pie(adata, meta, target = None, cmap = None, title = None, savefig = False):
+    thred = 5
+    draw_df = meta.groupby(target).count()
+    draw_df.sort_values(draw_df.columns[0], ascending=False, inplace=True)
+    
+    # Calculate percentages
+    percentages = draw_df.iloc[:, 0] / draw_df.iloc[:, 0].sum() * 100
+    
+    draw_df = pd.DataFrame(percentages)
+    draw_df['celltype'] = draw_df.index
+    draw_df['celltype'] = draw_df['celltype'].astype(str)
+    draw_df.columns = ['per', 'celltype']
+    draw_df.loc[draw_df['per'] < thred, 'celltype'] = 'Other cell types'
+
+    labels = [label if pct >= thred else '' for label, pct in zip(draw_df['celltype'], percentages)]
+    # Conditionally set the label format for percentages
+    def label_format(pct):
+        if pct >= thred:
+            return f'{pct:.1f}%'
+        else:
+            return ''
+    
+    # Plot the pie chart
+    plt.pie(draw_df['per'].values, labels=labels, colors=[cmap[x] for x in draw_df['celltype']],
+            autopct=label_format, textprops={'fontsize': 18})
+    
+    if title:
+        plt.title(title)
+    
+    if savefig:
+        save_path = adata.uns['figpath']
+        savefig = f'{save_path}/{title}_pie.pdf'
+        plt.savefig(f'{savefig}', bbox_inches='tight')
+    plt.show()
+    plt.clf()
+
+
+
+def spatial_gene_score(adata, gene_score = None,
+                     log=True,scale = True, spot_agg = False,
+                     hl_type = [], tp_key = 'celltype', rect = False,
+                     theme_white = True, legend = True, figsize = (3.4, 2.6),):
+    meta = adata.obs
+    cmap = plt.cm.plasma
+    last_color = cmap.colors[0]
+    # last_color = 'black'
+    if 'adj_spex_UMAP1' in meta.columns:
+        cols = ['adj_spex_UMAP1','adj_spex_UMAP2']
+        size = 10
+    elif 'adj_UMAP1' in meta.columns:
+        cols = ['adj_UMAP1','adj_UMAP2']
+        size = 10
+    else:
+        cols = ['x','y']
+        size = 20
+    
+    if spot_agg:
+        data = pd.DataFrame(meta.groupby('spot').mean(numeric_only=True)[gene_score])
+        cols = ['st_x','st_y']
+        size = 40
+        coords = meta.groupby('spot').mean(numeric_only=True)[cols]
+    else:
+        data = pd.DataFrame(meta[gene_score].copy())
+        coords = meta[cols]
+    
+    if log == True:
+        data = np.log(data+1)
+
+    if scale == True:
+        data = data.apply(lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)))
+        
+    data = pd.concat((data,coords),axis = 1)
+    plt.figure(figsize=figsize)
+    if hl_type:
+        hl_idx = adata.obs[adata.obs[tp_key].isin(hl_type)].index
+        subset_data = data.loc[hl_idx].copy()
+        bg_data = data[~data.index.isin(hl_idx)] 
+        with sns.axes_style("white"):
+            plt.scatter(x=bg_data[cols[0]], y=bg_data[cols[1]],
+                        s=size, linewidth=False, color = '#ccc')
+            plt.scatter(x=subset_data[cols[0]], y=subset_data[cols[1]], c=subset_data[gene_score], 
+                        s=size+5, linewidth=False, cmap=cmap)
+            plt.title(f'{gene_score}', fontsize=22)
+    else:
+        bg_data = data[data[gene_score] <= 0] 
+        if len(bg_data) > 1:
+            with sns.axes_style("white"):
+                plt.scatter(x=bg_data[cols[0]], y=bg_data[cols[1]], 
+                            s=size, linewidth=False, color = last_color) 
+            # Filter the data where gene is not equal to 0
+                filtered_data = data[data[gene_score] > 0]
+        else:
+            filtered_data = data
+        with sns.axes_style("white"):
+            plt.scatter(x=filtered_data[cols[0]], y=filtered_data[cols[1]], c=filtered_data[gene_score], 
+                        s=size, linewidth=False, cmap=cmap)
+            plt.title(f'{gene_score}',fontsize=22)
+
+    if rect: 
+        if isinstance(rect, bool):
+            x_min,y_min = subset_data.loc[hl_idx][cols].min()
+            x_max,y_max = subset_data.loc[hl_idx][cols].max()
+        elif isinstance(rect, list):
+            x_min,y_min = rect[0]
+            x_max,y_max = rect[1]
+        rect_width = x_max - x_min  # Width of the rectangle
+        rect_height = y_max - y_min  # Height of the rectangle
+        rect_color = 'red'  # Rectangle color 
+        rectangle = plt.Rectangle((x_min, y_min), rect_width, rect_height, fill=False, color=rect_color, linewidth=2)
+        plt.gca().add_patch(rectangle)
+        
+    if legend:
+        if scale:
+            cbar = plt.colorbar(ticks = [0,1])
+            cbar.set_label(label = 'Standardized score', fontsize=16)  
+        else:
+            cbar = plt.colorbar()
+            cbar.set_label(label = 'Score', fontsize=16)  
+        cbar.ax.tick_params(labelsize=16)
+        
+    plt.axis('equal')
+
+    if theme_white:
+        plt.legend([],[], frameon=False)  
+        sns.despine(left=True, bottom=True)
+        plt.tick_params(left=False, bottom=False, top = False, right = False)
+        plt.tight_layout()
+        sns.despine(left=True, bottom=True)
+        plt.xlabel('',fontsize=16)
+        plt.ylabel('',fontsize=16)
+        plt.xticks([],fontsize=14)
+        plt.yticks([],fontsize=14)
+    else:
+        plt.tick_params(left=False, bottom=False, top = False, right = False)
+        plt.tight_layout()
+        # sns.despine(left=True, bottom=True)
+        plt.xlabel('',fontsize=16)
+        plt.ylabel('',fontsize=16)
+        plt.xticks([],fontsize=14)
+        plt.yticks([],fontsize=14)
+    plt.show()
+#######################
+###### Comparing ######
+#######################
+    
+def venn2(before_lri,tp1,after_lri,tp2,venn_color,title = None):
+    from matplotlib_venn import venn2
+    venn = venn2([set(before_lri), set(after_lri)], set_labels=(tp1, tp2))
+    venn.get_patch_by_id('10').set_color(venn_color[0])  # Set A color
+    venn.get_patch_by_id('01').set_color(venn_color[2])  # Set B color
+    venn.get_patch_by_id('11').set_color(venn_color[1])  # Overlapping region color
+    if title is not None:
+        plt.title(title,fontsize=16)
+    for patch in venn.patches:
+        patch.set_alpha(.8)
