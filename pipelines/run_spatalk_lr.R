@@ -1,4 +1,4 @@
-# library(SpaTalk)
+library(SpaTalk)
 options(warn = 0)  
 # load starmap data
 args = commandArgs(T)
@@ -8,8 +8,7 @@ sc_coord_dir <- args[3]
 meta_key <- args[4]
 species <- args[5]
 out_f <- args[6]
-out_f = paste0(out_f,'/spa/')
-print(length(args))
+out_f = paste0(out_f,"/")
 print(args)
 
 if (length(args) > 6){
@@ -25,7 +24,12 @@ scriptPath <- normalizePath(sub("^--file=", "", args[grep("^--file=", args)]))
 scriptPath <- dirname(scriptPath)
 ##########
 dir.create(file.path(out_f), showWarnings = FALSE)
-# print(out_f)
+if (file.exists(out_f)) {
+  print("The file exists")
+} else {
+  print("The file does not exist")
+}
+print(out_f)
 # print(meta_key)
 if (grepl('csv', st_dir)){
     st_data = t(read.table(file = st_dir, sep = ',', header = TRUE,row.names = 1))
@@ -89,6 +93,7 @@ if (grepl('Human', species)){
     new_lrpairs$ligand = gsub("_", "-", new_lrpairs$ligand)
     new_lrpairs$receptor = gsub("_", "-", new_lrpairs$receptor)
     new_lrpairs = unique(new_lrpairs)
+    lrpairs = new_lrpairs
 }
 
 
@@ -114,7 +119,7 @@ obj <- createSpaTalk(st_data = as.matrix(st_data),
 tp_lst = unique(obj@meta$rawmeta$celltype)
 
 
-obj <- find_lr_path(object = obj , lrpairs = new_lrpairs, pathways = pathways, if_doParallel = T, use_n_cores=n_cores, max_hop = max_hop)
+obj <- find_lr_path(object = obj , lrpairs = lrpairs, pathways = pathways, if_doParallel = T, use_n_cores=n_cores, max_hop = max_hop)
 
 for (tp1 in tp_lst) {
   for (tp2 in tp_lst) {
@@ -157,67 +162,3 @@ for (name in names(r_object)) {
 }
 write.csv(df, paste0(out_f,"/cellpair.csv"), row.names = T,quote = F)
 write.csv(obj@meta$rawmeta, paste0(out_f,"/spatalk_meta.csv"), row.names = T,quote = F)
-
-# my_dict <- list()
-# for (i in seq_along(obj@cellpair)) {
-#     # Extract assay name and length
-#     assay_name <- names(obj@cellpair)[i]
-#     print(assay_name)
-#     assay_length <- nrow(obj@cellpair[[i]])
-#     print(assay_length)
-#     # Extract L1, L2, and L3 labels from assay name
-#     labels <- strsplit(assay_name, " -- ")[[1]]
-#     sender <- labels[1]
-#     rec <- labels[2]
-#     if (sender %in% names(my_dict)){
-#         my_dict[[sender]] = my_dict[[sender]] + assay_length
-#     } else{
-#         # initial
-#         print('init')
-#         my_dict[[sender]] = assay_length
-#     }
-#     if (rec %in% names(my_dict)){
-#         my_dict[[rec]] = my_dict[[rec]] + assay_length
-#     } else{
-#         # initial
-#         print('init')
-#         my_dict[[rec]] = assay_length
-#     }
-#     # break
-# }
-# my_df <- as.data.frame(my_dict)
-# write.table(my_df, file = paste0(out_f,"/CCI_nn_tps.tsv"), sep='\t', quote = F)
-
-# names_list = colnames(my_df)
-
-# df <- matrix(0, nrow = length(names_list), ncol = length(names_list),
-#              dimnames = list(names_list, names_list))
-# # Convert the matrix to a data frame
-# df <- as.data.frame(df)
-
-# for (i in seq_along(obj@cellpair)) {
-#     # Extract assay name and length
-#     assay_name <- names(obj@cellpair)[i]
-#     print(assay_name)
-#     assay_length <- nrow(obj@cellpair[[i]])
-#     print(assay_length)
-#     # Extract L1, L2, and L3 labels from assay name
-#     labels <- strsplit(assay_name, " -- ")[[1]]
-#     sender <- labels[1]
-#     rec <- labels[2]
-#     df[sender,rec] = assay_length
-#     }
-# write.table(df, file = paste0(out_f,"/CCI_n_df.tsv"), sep='\t', quote = F)
-
-# # 压扁 每个rec而言sender的占比 colsum = 1
-# colsums <- colSums(df)
-# df_send <- t(apply(df, 1, function(x) x / colsums))
-# df_send[is.na(df_send)] <- 0
-# # e.g. df_send最后一列是Ex5b作为rec，Ex4只有Ex5b一个rec
-# # 每个sender而言rec的占比，rowsum = 1
-# rowsums <- rowSums(df)
-# df_rec <- apply(df, 2, function(x) x / rowsums)
-# df_rec[is.na(df_rec)] <- 0
-# # e.g. df_rec最后一行是Ex5b作为sender，没有rec细胞，所以全是0
-# write.table(df_send, file = paste0(out_f,"/col4Rec_nn_tps.tsv"), sep='\t', quote = F)
-# write.table(df_rec, file = paste0(out_f,"/row4Send_nn_tps.tsv"), sep='\t', quote = F)

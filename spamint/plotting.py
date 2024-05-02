@@ -29,6 +29,7 @@ def sc_celltype(adata, color_map = None, tp_key = 'celltype',
     sc_agg_meta['celltype_num'] = sc_agg_meta.groupby(tp_key)['pivot'].transform('count')
     #draw scater plot of each celltype in a order of celltype_num, large to small
     sc_agg_meta = sc_agg_meta.sort_values(by=['celltype_num'],ascending=False)
+    sc_agg_meta[tp_key] = sc_agg_meta[tp_key].astype(object)
     if 'adj_spex_UMAP1' in sc_agg_meta.columns:
         cols = ['adj_spex_UMAP1','adj_spex_UMAP2']
     elif 'adj_UMAP1' in sc_agg_meta.columns:
@@ -39,6 +40,7 @@ def sc_celltype(adata, color_map = None, tp_key = 'celltype',
         cols = ['row','col']
     else:
         cols = ['x','y']
+    
     plt.figure(figsize=figsize)
     with sns.axes_style("white"):
         if subset_idx is None:
@@ -65,7 +67,7 @@ def sc_celltype(adata, color_map = None, tp_key = 'celltype',
                 rectangle = plt.Rectangle((x_min, y_min), rect_width, rect_height, fill=False, color=rect_color, linewidth=2)
                 plt.gca().add_patch(rectangle)
         if legend:
-            if sc_agg_meta[tp_key].nunique() > 30:
+            if sc_agg_meta[tp_key].nunique() > 18:
                 ncol = 2
             else:
                 ncol = 1
@@ -195,8 +197,8 @@ def sc_subtype(adata,color_map = None,tp_key = 'celltype', target_tp = None, siz
 
 
 
-def boxplot(adata, metric = 'spot_cor', palette_dict = None,
-                 x='method', y='pair_num', hue='method',figsize = (2.4, 3),
+def boxplot(adata, metric = 'spot_cor', palette_dict = None, sub_idx = None,
+                 x = 'method', y = 'pair_num', hue='method',figsize = (2.4, 3),
                  ylabel='LRI count', dodge=False,legend = False,
                  test = 't-test_ind',rotate_x = False,
                  savefig = False, title = None):
@@ -206,8 +208,14 @@ def boxplot(adata, metric = 'spot_cor', palette_dict = None,
     't-test_welch', 't-test_paired', 'Mann-Whitney', 'Mann-Whitney-gt', 
     'Mann-Whitney-ls', 'Levene', 'Wilcoxon', 'Kruskal', 'Brunner-Munzel'
     '''
-    if metric == 'spot_cor':
-        draw_df = adata.uns['spot_cor']
+    if (metric == 'spot_cor') or (metric == 'gene_cor'):
+        draw_df = adata.uns[metric]
+    elif metric == 'moran':
+        # draw_df = pd.DataFrame(adata.var['I'])
+        draw_df = adata.uns[metric]
+    
+    if sub_idx:
+        draw_df = draw_df.loc[sub_idx]
 
     from statannotations.Annotator import Annotator
 
@@ -333,6 +341,103 @@ def highlight_x(draw_df, x, x_highlight):
 def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highlight=None, 
                 savefig=None, figsize=None, legend=False, xrotate=False,
                 showlabel=False, xlabel = None, ylabel = None, title=None, 
+                  cmap='viridis',hue='Count', size='GeneRatio',vmin = None, vmax = None, 
+                  color_bar_pos = [1.1, 0.35, 0.55, 0.35]):
+    '''
+    Red label item in x, y axis
+    highlight = 'T_cells_CD4+'
+    or
+    highlight = ['T_cells_CD4+','B cell]
+    '''
+    if figsize is None:
+        width = np.max([int(np.ceil(len(draw_df[x].unique()) / 3.5)), 2])+0.2
+        height = int(np.ceil(len(draw_df[y].unique())/4)+1)
+        if xlabel:
+            height += 0.5
+        if ylabel:
+            width += 0.5
+        print(f'Auto figsize {(width,height)}')
+    else:
+        width = figsize[0]
+        height = figsize[1]
+
+    print(width,height)
+    with sns.axes_style("whitegrid"):
+        plt.figure(figsize=(width, height))
+        ax = sns.scatterplot(data = draw_df, x = x, y = y, hue = hue, 
+                        legend = legend,
+                        palette = cmap, 
+                        size = size, sizes = (50,300)
+                        )
+        
+        highlight_x(draw_df, x, x_highlight)
+        highlight_y(draw_df, y, y_highlight)
+
+        plt.yticks(fontsize=16)
+        plt.xticks(fontsize=16)
+
+        if legend:
+            sizes = np.percentile(draw_df[size], [25, 50, 75, 100])
+            sizes = np.round(sizes, 2)
+            labels = np.percentile(range(50,300), [25, 50, 75, 100])
+            labels = np.round(labels, 0)
+            legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+                            markerfacecolor='black', markersize=labels[i]/20, label=sizes[i]) 
+                            for i in range(len(sizes))]
+            plt.legend(handles=legend_elements, title=size, title_fontsize=14, loc='center left', bbox_to_anchor=(1.2, 0.4), 
+                       fontsize=14, handlelength = 0.5, handletextpad=0.5,labelspacing=0.2)
+        
+            import matplotlib.colors
+            if isinstance(vmin,int):
+                norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+            else:
+                norm = matplotlib.colors.Normalize(vmin=min(draw_df[hue]), vmax=max(draw_df[hue]))
+            print(norm)
+            sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+            sm.set_array([])
+            # plt.colorbar(sm)
+            colorbar = plt.colorbar(sm, shrink=1,ax=ax, orientation='horizontal')
+            # colorbar = plt.colorbar(sm, cax=cbar_ax, orientation='vertical', pad=0.05)
+            colorbar.ax.set_title(hue, fontsize = 12)
+            # colorbar.ax.set_position([1.1, 0.35, 0.55, 0.35]) # kegg
+            colorbar.ax.set_position(color_bar_pos)
+
+        if showlabel == False:
+            plt.xlabel('')
+            plt.ylabel('')
+        else:
+            if xlabel:
+                plt.xlabel(xlabel,fontsize = 22)
+            else:
+                plt.xlabel('',fontsize = 22)
+
+            if ylabel:
+                plt.ylabel(ylabel,fontsize = 22)
+            else:
+                plt.ylabel('',fontsize = 22)
+
+        if title:
+            plt.title(title,fontsize=16)
+
+        if xrotate:
+            plt.xticks(rotation=90)
+
+        plt.xlim(-0.5, len(draw_df[x].unique())-0.5) 
+        plt.ylim(len(draw_df[y].unique())-0.5,-0.5)   
+        # if len(draw_df[x].unique()) == 2:
+        #     plt.xlim(-0.5, 1.5)
+        #     # plt.ylim(10, -0.8)
+        # elif len(draw_df[x].unique()) == 3:
+        #     plt.xlim(-0.5, 2.5)
+        if savefig:
+            plt.savefig(f'{savefig}')
+        plt.show()
+        plt.clf()
+
+
+def old_draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highlight=None, 
+                savefig=None, figsize=None, legend=False, xrotate=False,
+                showlabel=False, xlabel = None, ylabel = None, title=None, 
                   cmap='viridis',hue='Count', size='GeneRatio',vmin = None, vmax = None):
     '''
     Red label item in x, y axis
@@ -372,7 +477,6 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
             sizes = np.round(sizes, 2)
             labels = np.percentile(range(50,300), [25, 50, 75, 100])
             labels = np.round(labels, 0)
-            print(labels)
             legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
                             markerfacecolor='black', markersize=labels[i]/20, label=sizes[i]) 
                             for i in range(len(sizes))]
@@ -380,18 +484,16 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
                        fontsize=14, handlelength = 0.5, handletextpad=0.5,labelspacing=0.2)
         
             import matplotlib.colors
-            if vmin:
+            if isinstance(vmin,int):
                 norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
             else:
                 norm = matplotlib.colors.Normalize(vmin=min(draw_df[hue]), vmax=max(draw_df[hue]))
+            print(norm)
             sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
             sm.set_array([])
             # plt.colorbar(sm)
-            colorbar = plt.colorbar(sm, shrink=0.6)
-            colorbar.ax.set_title(hue,fontsize = 14)
-
-
-
+            colorbar = plt.colorbar(sm, shrink=0.6,ax=ax)
+            colorbar.ax.set_title(hue, fontsize = 14)
         if showlabel == False:
             plt.xlabel('')
             plt.ylabel('')
@@ -406,8 +508,8 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
             else:
                 plt.ylabel('',fontsize = 22)
 
-            if title:
-                plt.title(title,fontsize=22)
+        if title:
+            plt.title(title,fontsize=22)
 
         if xrotate:
             plt.xticks(rotation=90)
@@ -421,8 +523,8 @@ def draw_bubble(draw_df, x=None, y="Description", x_highlight = None, y_highligh
         #     plt.xlim(-0.5, 2.5)
         if savefig:
             plt.savefig(f'{savefig}')
-    plt.show()
-    plt.clf()
+        plt.show()
+        plt.clf()
 
 
 
@@ -431,7 +533,7 @@ def celltype_cci(adata, is_sender_per = True, figsize = (3.6,3.6),
                  target_sender = None, target_receiver = None, y_highlight='', x_highlight='',
                 cmap = 'Reds', hue = 'LRI',showlabel = True,
                 vmin = None, vmax = None,
-                size = 'CCI',xrotate = True, legend = True,
+                size = 'CCI',xrotate = True, legend = True, color_bar_pos = [1.1, 0.35, 0.55, 0.35],
                 savefig = False, title = ''):
     '''
     is_sender_per: if True, use the cci percentage file that sender row sum is 1 [send_per].
@@ -451,13 +553,14 @@ def celltype_cci(adata, is_sender_per = True, figsize = (3.6,3.6),
     draw_bubble(draw_df, x='Receiver', y='Sender', x_highlight = x_highlight, y_highlight=y_highlight,
                     savefig = savefig, title = title, figsize = figsize, legend = legend,
                     vmin = vmin, vmax = vmax,
-                    showlabel = showlabel, xrotate = xrotate, cmap=cmap, hue=hue, size=size)
+                    showlabel = showlabel, xrotate = xrotate, cmap=cmap, hue=hue, size=size, color_bar_pos = color_bar_pos)
     
 
 def clustermap(df, index = 'ligand', col = 'receptor', value = 'lr_co_exp_num',
-                 aggfunc = 'sum', log = True, row_cluster = False, col_cluster = False,
-                 highlight = None,  cmap = 'coolwarm', title = '',
-                 xticks = False, yticks = True, figsize = (5,5),
+                 aggfunc = 'sum', log = True, scale = False, row_cluster = False, col_cluster = False,
+                 highlight = None,  cmap = 'coolwarm', title = '', rotate_x = True,
+                 xticks = False, yticks = True, xlabel = True, ylabel = True, cbar_x = 1.2,
+                 figsize = (5,5),col_colors = None, row_colors = None,
                  savefig = False):
     '''
     df: dataframe
@@ -490,9 +593,12 @@ def clustermap(df, index = 'ligand', col = 'receptor', value = 'lr_co_exp_num',
     else:
         legend_label = f'{value}'
 
+    if scale == True:
+        n_tp_lri = n_tp_lri.apply(lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)))
+        
     clustermap = sns.clustermap(n_tp_lri,row_cluster=row_cluster,col_cluster=col_cluster,
-               standard_scale=None,dendrogram_ratio=0.001,cmap = cmap,
-               figsize=figsize, cbar_pos=(1.2, 0.5, 0.02, 0.2),cbar_kws={'orientation': 'vertical','label':legend_label})
+               standard_scale=None,dendrogram_ratio=0.001,cmap = cmap, col_colors = col_colors,row_colors = row_colors,
+               figsize=figsize, cbar_pos=(cbar_x, 0.5, 0.02, 0.2),cbar_kws={'orientation': 'vertical','label':legend_label})
     if not xticks:
         clustermap.ax_heatmap.set_xticklabels([])
         clustermap.ax_heatmap.set_xticks([])
@@ -508,33 +614,56 @@ def clustermap(df, index = 'ligand', col = 'receptor', value = 'lr_co_exp_num',
         clustermap.ax_heatmap.yaxis.label.set_size(18)
         clustermap.ax_heatmap.yaxis.set_tick_params(labelsize=16)
 
+    if not xlabel:
+        clustermap.ax_heatmap.set_xlabel('')
+    else:
+        if xlabel != True:
+            clustermap.ax_heatmap.set_xlabel(xlabel)
+    if not ylabel:
+        clustermap.ax_heatmap.set_ylabel('')
+    else:
+        if ylabel != True:
+            clustermap.ax_heatmap.set_ylabel(ylabel)
 
     if highlight is not None:
         arr = n_tp_lri.index.to_list()
-        # Reorganize the index labels based on the cluster order
-        reordered_index = [arr[i] for i in clustermap.dendrogram_row.reordered_ind]
-        # Customize the ytick color and font weight
-        yticks, _ = plt.yticks()
-        ytick_labels = clustermap.ax_heatmap.get_yticklabels()
-        for index, ytick_label in enumerate(ytick_labels):
-            if reordered_index[index] in highlight:
-                ytick_label.set_color('red')
-                ytick_label.set_weight('bold')
-    
+        if row_cluster:
+            # Reorganize the index labels based on the cluster order
+            reordered_index = [arr[i] for i in clustermap.dendrogram_row.reordered_ind]
+            # Customize the ytick color and font weight
+            yticks, _ = plt.yticks()
+            ytick_labels = clustermap.ax_heatmap.get_yticklabels()
+            for index, ytick_label in enumerate(ytick_labels):
+                if reordered_index[index] in highlight:
+                    ytick_label.set_color('red')
+                    ytick_label.set_weight('bold')
+        else:
+            highlighted_ytick = np.where(np.isin(arr, highlight))[0]
+            print(highlighted_ytick) # The ytick to be highlighted
+            # Customize the ytick color
+            _, yticks = plt.yticks()
+            print(yticks)
+            ytick_labels = clustermap.ax_heatmap.get_yticklabels()
+            for index, ytick_label in enumerate(ytick_labels):
+                if arr[index] in highlight:
+                    ytick_label.set_color('red')
+                    ytick_label.set_weight('bold')
     if title:
-        clustermap.ax_heatmap.set_title(title,fontsize=22) 
+        clustermap.ax_heatmap.set_title(title,fontsize=18, y = 1.05) 
 
     if savefig:
         plt.savefig(f'{savefig}')
 
-    plt.xticks(fontsize=16)
-    plt.yticks(fontsize=16)
+    # plt.xticks(fontsize=16)
+    # plt.yticks(fontsize=16)
 
-
+    if rotate_x:
+        # print('r')
+        plt.xticks(fontsize=16, rotation=90)
     plt.show()
 
 
-def lri_heatmap(adata, target_sender = [], target_receiver = [], title = None, unique_lri = False,
+def lri_heatmap(adata, is_sender = False, target_sender = [], target_receiver = [], title = None, unique_lri = False,
                 figsize = (8,3), log = True, row_cluster = True, col_cluster = False,
                 highlight_lri = None, cmap = 'Reds',cellTypeAsCol = True,
                 xticks = True, yticks = True,savefig = False):
@@ -545,7 +674,12 @@ def lri_heatmap(adata, target_sender = [], target_receiver = [], title = None, u
     
     if len(target_receiver) == 0:
         target_receiver = lri_df['celltype_receiver'].unique()
-        
+
+    if is_sender:
+        col_type = 'celltype_sender'    
+    else:
+        col_type = 'celltype_receiver'
+
     lri_df = lri_df[lri_df['celltype_sender'].isin(target_sender) & lri_df['celltype_receiver'].isin(target_receiver)].copy()
     if unique_lri:
         df = lri_df.groupby('LRI').count()
@@ -569,12 +703,12 @@ def lri_heatmap(adata, target_sender = [], target_receiver = [], title = None, u
         save_path = adata.uns['figpath']
         savefig = f'{save_path}/{title}_LRI_co_exp_heatmap.pdf'
     if cellTypeAsCol:
-        clustermap(lri_df,index = 'LRI', col = 'celltype_receiver', value = 'lr_co_exp_num',
+        clustermap(lri_df,index = 'LRI', col = col_type, value = 'lr_co_exp_num',
                         aggfunc = 'sum', log = log, row_cluster = row_cluster, col_cluster = col_cluster,
                         figsize = figsize, cmap = cmap, title = title, savefig = savefig,
                         highlight = highlight, xticks = xticks, yticks = yticks)        
     else:
-        clustermap(lri_df,index = 'celltype_receiver', col = 'LRI', value = 'lr_co_exp_num',
+        clustermap(lri_df,index = col_type, col = 'LRI', value = 'lr_co_exp_num',
                         aggfunc = 'sum', log = log, row_cluster = row_cluster, col_cluster = col_cluster,
                         figsize = figsize, cmap = cmap, title = title, savefig = savefig,
                         highlight = highlight, xticks = xticks, yticks = yticks)
@@ -586,7 +720,8 @@ def top_kegg_enrichment(adata, top_n = 10, groupby_sender = False,
                         target_sender = [], target_receiver = [],target_path = [], 
                         use_lig_gene = True, use_rec_gene = True,
                         cmap = 'RdPu', hue = '-log10 pvalue', size = 'GeneRatio',
-                        legend = True, figsize = None, savefig = False):
+                        legend = True, figsize = None, savefig = False,
+                        color_bar_pos = [1.1, 0.35, 0.55, 0.35]):
     # TODO discard cancer related
     kegg_res = adata.uns['kegg_enrichment']
 
@@ -621,10 +756,10 @@ def top_kegg_enrichment(adata, top_n = 10, groupby_sender = False,
         top_keggs = pd.concat([top_keggs,top_kegg]) 
         draw_bubble(top_kegg, x = show_row, y_highlight = target_path,
                     y = "Description",cmap = cmap, hue = hue,
-                    size = size,xrotate = True,legend = True, 
+                    size = size,xrotate = True,legend = legend, 
                     title = title, showlabel = True,
-                    xlabel = xlabel,figsize = figsize
-                    )
+                    xlabel = xlabel,figsize = figsize,savefig = savefig,
+                    color_bar_pos = color_bar_pos)
         plt.clf()
     return top_keggs
 
@@ -633,7 +768,7 @@ def top_kegg_enrichment(adata, top_n = 10, groupby_sender = False,
 def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred = 5, top_n_each = 999,
                 target_sender = [], target_receiver = [], target_path = '', 
                 use_lig_gene = True, use_rec_gene = True,
-                savefig = False, show_title = True,
+                savefig = False, show_title = True, unique_lri = None,
                 figsize = None, log = True, row_cluster = True, col_cluster = False,
                 highlight = None, cmap = 'Reds',cellTypeAsCol = True,
                 xticks = True, yticks = True):
@@ -654,12 +789,28 @@ def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred =
     lri_df = lri_df[lri_df['celltype_sender'].isin(target_sender) &
                     lri_df['celltype_receiver'].isin(target_receiver)]
     
+    if unique_lri:
+        df = lri_df.groupby(['celltype_sender','LRI']).count()
+        df.reset_index(inplace = True)
+        if isinstance(unique_lri,bool):
+            uniq_count_thred = int(np.round(df["ligand"].mean()))
+            # print('boolean',uniq_count_thred)
+        elif isinstance(unique_lri,int):
+            uniq_count_thred = unique_lri
+            # print('int',uniq_count_thred)
+        else:
+            raise ValueError('unique_lri should be bool or int')
+        loose_uniq_lri = df[df['ligand'] <= uniq_count_thred]['LRI'].tolist()
+        lri_df = lri_df[lri_df['LRI'].isin(loose_uniq_lri)].copy()
+
+    
     path_genes = []
     for _, row in kegg_res.iterrows():
         tmp_genes = row['geneSymbol'].split('/')
         # print(len(tmp_genes))
         path_genes.extend(tmp_genes)
     path_genes = list(set(path_genes))
+
     if (lig_gene == 'L') and (rec_gene == 'R'):
         target_df = lri_df[lri_df['ligand'].isin(path_genes) & lri_df['receptor'].isin(path_genes)]
     elif (lig_gene == 'L') and (rec_gene == 'n'):
@@ -694,7 +845,7 @@ def keggPath_lri(adata, groupby_sender = False, value = 'lr_co_exp_num', thred =
                         aggfunc = 'sum', log = log, row_cluster = row_cluster, col_cluster = col_cluster,
                         figsize = figsize, cmap = cmap, title = title, savefig = savefig,
                         highlight = highlight, xticks = xticks, yticks = yticks)
-    return kegg_res
+    return target_df
 
 
 
@@ -845,10 +996,10 @@ def draw_lr_flow3(df, left_panel = 'ligand', mid_panel = 'receptor', right_panel
 
 
 
-def spatial_gene_exp(adata, gene = None,method = None,group = None,
-                     log=True,scale = True,
+def spatial_gene_exp(adata, gene = None, method = None, group = None,
+                     log = True, scale = True, size = 10, title = None,
                      hl_type = [], tp_key = 'celltype', rect = False,
-                theme_white = True, legend = True, figsize = (3.4, 2.6),):
+                    theme_white = True, legend = True, figsize = (3.4, 2.6)):
     
     exp = adata.to_df()
     meta = adata.obs
@@ -873,16 +1024,13 @@ def spatial_gene_exp(adata, gene = None,method = None,group = None,
 
     if 'adj_spex_UMAP1' in meta.columns:
         cols = ['adj_spex_UMAP1','adj_spex_UMAP2']
-        size = 10
     elif 'adj_UMAP1' in meta.columns:
         cols = ['adj_UMAP1','adj_UMAP2']
-        size = 10
     else:
         cols = ['x','y']
-        size = 20
 
     data = pd.concat((data,meta[cols]),axis = 1)
-    plt.figure(figsize=figsize)
+    # plt.figure(figsize=figsize)
     if hl_type:
         hl_idx = adata.obs[adata.obs[tp_key].isin(hl_type)].index
         sub_data = data.loc[hl_idx].copy()
@@ -892,15 +1040,15 @@ def spatial_gene_exp(adata, gene = None,method = None,group = None,
                         s=size, linewidth=False, color = '#ccc')
             plt.scatter(x=sub_data[cols[0]], y=sub_data[cols[1]], c=sub_data[gene], 
                         s=size+5, linewidth=False, cmap=cmap)
-            plt.title(f'{method} {gene} of {" ".join(hl_type)}', fontsize=22)
-            if rect: 
-                x_min,y_min = sub_data[cols].min()
-                x_max,y_max = sub_data[cols].max()
-                rect_width = x_max - x_min  # Width of the rectangle
-                rect_height = y_max - y_min  # Height of the rectangle
-                rect_color = 'red'  # Rectangle color 
-                rectangle = plt.Rectangle((x_min, y_min), rect_width, rect_height, fill=False, color=rect_color, linewidth=2)
-                plt.gca().add_patch(rectangle)
+            title_text = f'{method} {gene} of {" ".join(hl_type)}'
+        if rect and isinstance(rect, bool):
+            x_min,y_min = sub_data.loc[hl_idx][cols].min()
+            x_max,y_max = sub_data.loc[hl_idx][cols].max()
+            rect_width = x_max - x_min  # Width of the rectangle
+            rect_height = y_max - y_min  # Height of the rectangle
+            rect_color = 'red'  # Rectangle color 
+            rectangle = plt.Rectangle((x_min, y_min), rect_width, rect_height, fill=False, color=rect_color, linewidth=2)
+            plt.gca().add_patch(rectangle)
     else:
         bg_data = data[data[gene] <= 0] 
         if len(bg_data) > 1:
@@ -914,18 +1062,36 @@ def spatial_gene_exp(adata, gene = None,method = None,group = None,
         with sns.axes_style("white"):
             plt.scatter(x=filtered_data[cols[0]], y=filtered_data[cols[1]], c=filtered_data[gene], 
                         s=size, linewidth=False, cmap=cmap)
-            plt.title(f'{method} {gene}',fontsize=22)
+            title_text = f'{method} {gene}'
+
+    if title:
+        plt.title(title,fontsize=22)
+    else:
+        plt.title(title_text,fontsize=22)
+
+    if rect and isinstance(rect, list):
+        x_min,y_min = rect[0]
+        x_max,y_max = rect[1]
+        rect_width = x_max - x_min  # Width of the rectangle
+        rect_height = y_max - y_min  # Height of the rectangle
+        rect_color = 'red'  # Rectangle color 
+        rectangle = plt.Rectangle((x_min, y_min), rect_width, rect_height, fill=False, color=rect_color, linewidth=2)
+        plt.gca().add_patch(rectangle)
 
     if legend == True:
-        plt.colorbar(ticks = [0,1], label = 'Standardized expression')
+        plt.colorbar(ticks = [0,1], label = 'Expression', anchor=(0,0.5))
+        
     plt.axis('equal')
+    # print(filtered_data[cols[0]].min(),filtered_data[cols[0]].max())
+    # print(np.ceil(filtered_data[cols[0]].min()))
+    # plt.xlim(np.ceil(filtered_data[cols[0]].min()), np.ceil(filtered_data[cols[0]].max()))
+    # plt.xlim(-4.5, -2)
 
     if theme_white:
         plt.legend([],[], frameon=False)  
-        sns.despine(left=True, bottom=True)
         plt.tick_params(left=False, bottom=False, top = False, right = False)
         plt.tight_layout()
-        sns.despine(left=True, bottom=True)
+        # sns.despine(left=True, bottom=True)
         plt.xlabel('',fontsize=16)
         plt.ylabel('',fontsize=16)
         plt.xticks([],fontsize=14)
@@ -938,7 +1104,99 @@ def spatial_gene_exp(adata, gene = None,method = None,group = None,
         plt.ylabel('',fontsize=16)
         plt.xticks([],fontsize=14)
         plt.yticks([],fontsize=14)
+
+
+
+def LRI_of_CCI(adata_orig, sender = '',receiver = '',ligand = '', receptor = '',
+                hue = '',color_map = None,figsize = (6,3),arrow_length = 0.015, size = 30,
+                subset = True):
+    adata = adata_orig[adata_orig.uns['spatalk_meta'].index.astype(str)]
+    cellpair = adata.uns['cellpair']
+    cols = ['adj_spex_UMAP1','adj_spex_UMAP2']
+    adata.obs.index = adata.uns['spatalk_meta']['cell']
+    meta = adata.obs.copy()
+    # drop Categories 
+    meta[hue] = meta[hue].astype(object)
+    target_cellpair = cellpair[(cellpair['sender_tp'] == sender)&(cellpair['receiver_tp'] == receiver)].copy()
+    
+    target_cellpair[ligand] = adata[target_cellpair['cell_sender'],ligand].to_df().values
+    target_cellpair[receptor] = adata[target_cellpair['cell_receiver'],receptor].to_df().values
+    # print(target_cellpair.head(5))
+    draw_df = meta.loc[target_cellpair['cell_sender'].tolist()+target_cellpair['cell_receiver'].tolist()].copy()
+    if subset:
+    # cells in selected area
+        draw_bg=meta[(meta[cols[0]]>=draw_df[cols].min()[cols[0]])&(meta[cols[0]]<=draw_df[cols].max()[cols[0]])&
+                (meta[cols[1]]>=draw_df[cols].min()[cols[1]])&(meta[cols[1]]<=draw_df[cols].max()[cols[1]])]
+    else:
+        draw_bg = meta
+    # print(draw_bg[hue].unique())
+    celltype_df = draw_bg[draw_bg[hue].isin([sender,receiver])].copy()
+    # print(celltype_df[hue].unique())
+    target_cellpair_arrow = target_cellpair[(target_cellpair[ligand] >0)&(target_cellpair[receptor] >0)].copy()
+    plt.figure(figsize=figsize)
+    sns.scatterplot(data = draw_bg, x = cols[0], y=cols[1], 
+                    s = 10, alpha = 0.4,c=['#ccc'],edgecolor = None)
+    
+    sns.scatterplot(data = celltype_df, x=cols[0], y=cols[1],hue = hue, 
+                    s = size,alpha = 1, palette=color_map, edgecolor = None)      
+    
+    for _,row in target_cellpair_arrow.iterrows():
+        start = meta.loc[row['cell_sender']][cols]
+        end = meta.loc[row['cell_receiver']][cols]
+        color = 'black'
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        plt.arrow(start[0], start[1], dx, dy,
+                color=color, width=0.001, length_includes_head=True,
+                # head_length=arrow_length, head_width=arrow_length, 
+          head_width=arrow_length/2, head_length=arrow_length,
+          overhang = 0.2, alpha = 0.8,
+          head_starts_at_zero=False)
+  
+    # plt.legend([],[], frameon=Fase)
+    if figsize[0] > figsize[1]:
+        # landscape
+        plt.title(f'{sender}: {ligand} to {receiver}: {receptor}',fontsize=16)
+    else:
+        # portrait
+        plt.title(f'{sender}: {ligand} to \n {receiver}: {receptor}',fontsize=16)
+    leg = plt.legend(loc='center left', bbox_to_anchor=(0.99, 0.5),
+                             ncol=1, handletextpad=0.5,columnspacing=0.4,labelspacing=0.5,
+                             fontsize = 16,markerscale = 2,handlelength = 0.5)
+    leg.get_frame().set_linewidth(0.0)  # Remove legend frame
+    plt.xlabel('',fontsize=16)
+    plt.ylabel('',fontsize=16)
+    plt.xticks([],fontsize=14)
+    plt.yticks([],fontsize=14)
+    plt.axis('equal')
     plt.show()
+    #########################
+    if subset:
+        plt.figure(figsize=figsize)
+        rect_x,rect_y = draw_df[cols].min() # X-coordinate of the bottom-left corner
+        rect_y = draw_df[cols].min()[1]  # Y-coordinate of the bottom-left corner
+        rect_width = draw_df[cols].max()[0] - rect_x  # Width of the rectangle
+        rect_height = draw_df[cols].max()[1] - rect_y  # Height of the rectangle
+        rect_color = 'black'  # Rectangle color
+        sns.scatterplot(data=meta, x = cols[0], y=cols[1],hue = hue, 
+                        s = 10,alpha = 1, palette=color_map, edgecolor = None)
+        sns.scatterplot(data=draw_df, x=cols[0], y=cols[1],hue = hue, 
+                        s = 10,alpha = 1,palette=color_map,edgecolor = None)
+        # Draw the rectangle using Matplotlib
+        rectangle = plt.Rectangle((rect_x, rect_y), rect_width, rect_height, fill=False, color=rect_color)
+        plt.gca().add_patch(rectangle)
+        plt.legend([],[], frameon=False)
+        plt.title(f'{sender} to {receiver}',fontsize=16)
+        sns.despine(left=True, bottom=True)
+        plt.xlabel('',fontsize=16)
+        plt.ylabel('',fontsize=16)
+        plt.xticks([],fontsize=14)
+        plt.yticks([],fontsize=14)
+        plt.axis('equal')
+        plt.show()
+
+
+
 
 
 
@@ -982,8 +1240,7 @@ def patterns(adata, savefig = False, cmap = None, COL = None):
         plt.savefig(f'{savefig}')
 
 
-def celltype_pie(adata, meta, target = None, cmap = None, title = None, savefig = False):
-    thred = 5
+def celltype_pie(adata, meta, target = None, thred = 5, cmap = None, title = None, savefig = False):
     draw_df = meta.groupby(target).count()
     draw_df.sort_values(draw_df.columns[0], ascending=False, inplace=True)
     
@@ -995,7 +1252,7 @@ def celltype_pie(adata, meta, target = None, cmap = None, title = None, savefig 
     draw_df['celltype'] = draw_df['celltype'].astype(str)
     draw_df.columns = ['per', 'celltype']
     draw_df.loc[draw_df['per'] < thred, 'celltype'] = 'Other cell types'
-
+    # print(draw_df)
     labels = [label if pct >= thred else '' for label, pct in zip(draw_df['celltype'], percentages)]
     # Conditionally set the label format for percentages
     def label_format(pct):
@@ -1096,7 +1353,7 @@ def spatial_gene_score(adata, gene_score = None,
     if legend:
         if scale:
             cbar = plt.colorbar(ticks = [0,1])
-            cbar.set_label(label = 'Standardized score', fontsize=16)  
+            cbar.set_label(label = 'Scaled score', fontsize=16)  
         else:
             cbar = plt.colorbar()
             cbar.set_label(label = 'Score', fontsize=16)  
@@ -1130,10 +1387,44 @@ def spatial_gene_score(adata, gene_score = None,
 def venn2(before_lri,tp1,after_lri,tp2,venn_color,title = None):
     from matplotlib_venn import venn2
     venn = venn2([set(before_lri), set(after_lri)], set_labels=(tp1, tp2))
+    for text in venn.set_labels:
+        text.set_fontsize(22)
+    for text in venn.subset_labels:
+        text.set_fontsize(20)
     venn.get_patch_by_id('10').set_color(venn_color[0])  # Set A color
     venn.get_patch_by_id('01').set_color(venn_color[2])  # Set B color
     venn.get_patch_by_id('11').set_color(venn_color[1])  # Overlapping region color
     if title is not None:
-        plt.title(title,fontsize=16)
+        plt.title(title,fontsize=26)
     for patch in venn.patches:
         patch.set_alpha(.8)
+
+
+
+def gsea_enrichment(gsea_res, k=1, figsize_heat=(6, 5), figsize_gsea=(4, 4)):
+    import gseapy as gp
+    res_df = gsea_res.res2d
+    res_df = res_df[(res_df['NOM p-val'] < 0.01) & (res_df['ES'] > 0)].copy()
+    print(res_df)
+    genes = res_df.Lead_genes.loc[k].split(";")
+    print(genes)
+    ax = gp.heatmap(df=gsea_res.heatmat.loc[genes],
+                    z_score=None,
+                    title=res_df.Term.loc[k].split(' Hom')[0],
+                    figsize=figsize_heat,
+                    cmap=plt.cm.viridis,
+                    xticklabels=False)
+    plt.show()
+
+    term = res_df.Term
+    # print(term.loc[k])
+    # annot1 = res_df.loc[k,'NES']
+    # annot2 = res_df.loc[k,'NOM p-val']
+    # print(annot1)
+    plt.figure(figsize=figsize_gsea)
+    axs = gsea_res.plot(terms=term.loc[k], figsize=figsize_gsea)
+
+    # plt.annotate(f'NES = {annot1:.2f}', xy=(0, -0.35), fontsize=16, color='black')
+    # plt.annotate(f'Pval = {annot2:.3f}', xy=(0, -0.65), fontsize=16, color='black')
+
+    plt.show()

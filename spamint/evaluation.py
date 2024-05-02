@@ -8,6 +8,7 @@ from . import preprocess as pp
 def load_spatalk(result, pvalue_thred = 0.005, tp_map = None):
     result['celltype_sender'] = result['celltype_sender'].map(tp_map)
     result['celltype_receiver'] = result['celltype_receiver'].map(tp_map)
+
     result = result[result['lr_co_ratio_pvalue'] < pvalue_thred].copy()
     result["name"] = result[['ligand','receptor','celltype_sender','celltype_receiver']].apply("-".join, axis=1)
     # some are repeat with different score somehow
@@ -19,19 +20,25 @@ def load_spatalk(result, pvalue_thred = 0.005, tp_map = None):
 
 
 def runSpaTalk(adata, rscript_executable = '/apps/software/R/4.2.0-foss-2021b/bin/Rscript',
-               meta_key = 'celltype',species = 'Human',overwrite = False):
+               meta_key = 'celltype', tp_key = None, species = 'Human',overwrite = False,
+               st_dir = None, st_meta_dir = None):
     '''
     This function is to run SpaTalk and add its results on the adata object.
     '''
     save_path = adata.uns['save_path']
     out_f = f'{save_path}/spatalk/'
-    tp_key = adata.uns['tp_key']
+    if not tp_key:
+        tp_key = adata.uns['tp_key']
     if overwrite or not os.path.exists(f'{out_f}/lr_pair.csv'):
         script_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__))) + '/pipelines/'
         r_script_file = f'{script_path}/run_spatalk_lr.R'
         # TODO change name to sc_count.tsv and sc_meta.tsv
-        st_dir = f'{save_path}/alter_sc_exp.tsv'
-        st_meta_dir = f'{save_path}/spexmod_sc_meta.tsv'
+        if not st_dir:
+            st_dir = f'{save_path}/alter_sc_exp.tsv'
+
+        if not st_meta_dir:
+            st_meta_dir = f'{save_path}/spexmod_sc_meta.tsv'
+
         args = [st_dir,st_meta_dir,st_meta_dir,meta_key,species,out_f]
         subprocess.run([rscript_executable, "--vanilla", r_script_file]+ args)
 
@@ -39,15 +46,28 @@ def runSpaTalk(adata, rscript_executable = '/apps/software/R/4.2.0-foss-2021b/bi
         raise ValueError(f'Error in running SpaTalk, excuation halted.')
     else:
         # spatalk changes '-' to '_' in celltype.
-        tp4spatalk = adata.obs['celltype'].str.replace('-','_')
-        tp_map = dict(zip(tp4spatalk,adata.obs[tp_key]))
+        tp4spatalk = adata.obs[meta_key].str.replace('-','_')
+        tp_map = dict(zip(tp4spatalk, adata.obs[tp_key]))
         adata.uns['tp_map_spatalk'] = tp_map
-
         df = pd.read_csv(f'{out_f}/lr_pair.csv',sep = ',',header=0,index_col=0)
-        adata.uns['spatalk'] = load_spatalk(df, pvalue_thred = 0.005,tp_map = tp_map)
+        # print(df['celltype_sender'].unique())
+        # change from 0.005 to 0.01
+        adata.uns['spatalk'] = load_spatalk(df, pvalue_thred = 0.01,tp_map = tp_map)
         adata.uns['spatalk_meta'] = pp.read_csv_tsv(f'{out_f}/spatalk_meta.csv')
 
     # no need for return adata
+
+
+def SpaVis(adata, ligand = '',receptor = '',sender = '',receiver = ''):
+    save_path = adata.uns['save_path'] + '/spatalk/'
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)     
+    script_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__))) + '/pipelines/'
+    r_script_file = f'{script_path}/vis_spatalk.R'
+    rscript_executable = adata.uns['rscript_path']
+    args = [ligand,receptor,sender,receiver, save_path]
+    subprocess.run([rscript_executable, "--vanilla", r_script_file]+ args)
+    print(f'Plots saved in {save_path}')
 
 
 def generate_tp_lri(adata,col4Rec,sender_order,receiver_order):
@@ -59,6 +79,9 @@ def generate_tp_lri(adata,col4Rec,sender_order,receiver_order):
         sender_order = col4Rec.index.tolist()
     if receiver_order == None:
         receiver_order = col4Rec.columns.tolist()
+    
+    sender_order = [sender for sender in sender_order if sender in col4Rec.index.tolist()]
+    receiver_order = [receiver for receiver in receiver_order if receiver in col4Rec.columns.tolist()]
 
     data = col4Rec.loc[sender_order,receiver_order]
     data = data.div(data.sum(axis=1), axis=0)
@@ -86,10 +109,11 @@ def generate_tp_lri(adata,col4Rec,sender_order,receiver_order):
     return draw_target_pattern
 
 
-def generate_cci(adata, return_df = False):
+def generate_cci(adata, tp_key = None, return_df = False):
     save_path = adata.uns['save_path']+'/spatalk/'
-    tp_key = adata.uns['tp_key']
-    tp_map = adata.uns['tp_map_spatalk']
+    if not tp_key:
+        tp_key = adata.uns['tp_key']
+        tp_map = adata.uns['tp_map_spatalk']
     # print(save_path)
 
     cellpair = pp.read_csv_tsv(f'{save_path}/cellpair.csv')
@@ -250,3 +274,80 @@ def load_pattern(adata,k = 3):
     spex_pattern.iloc[:,:k] = spex_pattern.iloc[:,:k].apply(lambda x: (x - np.min(x)) / (np.max(x) - np.min(x)))
     adata.uns['pattern'] = spex_pattern
     return spex_pattern
+
+
+def load_histo(adata,k = 3):
+    fn_dir = adata.uns['save_path'] + f'/spade/histology_k_{k}.tsv'
+    spex_histo = pp.read_csv_tsv(fn_dir)
+    spex_histo.reset_index(inplace = True)
+    spex_histo.index = spex_histo['g']
+    spex_histo = spex_histo[spex_histo['pval']<0.05]
+    if f'pattern_{k}' not in spex_histo.columns:
+        spex_histo[f'pattern_{k}'] = spex_histo[f'pattern']
+        spex_histo[f'membership_{k}'] = spex_histo[f'membership']
+        del spex_histo['membership']
+        del spex_histo['pattern']
+    adata.uns['pattern_genes'] = spex_histo
+    return spex_histo
+
+
+def load_moran(adata):
+    fn_dir = adata.uns['save_path'] + f'/moran/moranI.tsv'
+    moran = pp.read_csv_tsv(fn_dir)
+    adata.var = pd.concat((adata.var,moran['I']),axis = 1)
+    return pd.DataFrame(moran['I'])
+
+
+def run_GSEA(after_adata,target_col = 'CAF_leiden',sorter = ['CAF_1','CAF_0'],
+             gene_set = 'GO_Biological_Process_2021'):
+    import gseapy as gp
+    import scanpy as sc
+    if 'lognorm' not in after_adata.layers.keys():
+        sc.pp.normalize_total(after_adata, target_sum=1e4)
+        sc.pp.log1p(after_adata)
+        after_adata.layers['lognorm'] = after_adata.X
+
+    after_adata.obs[target_col] = pd.Categorical(after_adata.obs[target_col], categories=sorter, ordered=True)
+    indices = after_adata.obs.sort_values([target_col]).index
+    after_adata = after_adata[indices,:]
+    res = gp.gsea(data=after_adata.to_df().T,
+        gene_sets=gene_set,
+        cls=after_adata.obs[target_col],
+        permutation_num=10000,
+        # permutation_type='phenotype',
+        permutation_type='gene_set',
+        outdir=None,
+        method='s2n', # signal_to_noise
+        threads= 16)
+    # print(res.res2d.head(10))
+    return res
+
+
+# def runLeiden(adata):
+#     save_path = adata.uns['figpath']
+#     if not os.path.exists(save_path):
+#         os.makedirs(save_path)     
+#     script_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__))) + '/pipelines/'
+#     script_file = f'{script_path}/run_leiden.py'
+#     python_executable = adata.uns['python_path']
+#     print(f'Plots saved in {save_path}')
+# parser.add_argument('-e', '--type-key', dest='tp_key', required=True, help='The colname of celltype in ST_meta')
+# parser.add_argument('-q', '--query-tp', dest='query_tp', required=True, help='The celltype to be analyzed')
+# parser.add_argument('-v', '--alter_exp', dest='alter_exp', required=True, help='ST')
+# parser.add_argument('-p', '--agg_meta', dest='agg_meta', required=True, help='ST meta')
+
+# parser.add_argument('-a', '--species', dest='species', required=True, default='human',help='If the species is human, default human')
+# parser.add_argument('-n', '--name', dest='name', required=False, help='Sample name which will be set as the prefix of output.SCC_ or SCC/')
+# parser.add_argument('-o', '--out-dir', dest='out_dir', required=False, help='Output file path')
+# args = parser.parse_args()
+# tp_key = adata.uns['tp_key']
+#     subprocess.run([python_executable, \
+#     script_file, \
+#     '-e', tp_key, \
+#     '-v', st, \
+#     '-p', st_coord, \
+#     '-a', name, \
+#     '-o', tp_key, \
+#     '-n', out, \
+#     '-q', orig_sc_file
+#     ])
