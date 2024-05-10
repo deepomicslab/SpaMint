@@ -16,6 +16,10 @@ obj = readRDS('spatalk.rds')
 sender_name <- gsub("/", "_", sender)
 receiver_name <- gsub("/", "_", receiver)
 
+source('/data6/wangjingwan/5.Simpute/SpaTalk-main/R/plot.R', chdir = TRUE)
+source('/data6/wangjingwan/5.Simpute/SpaTalk-main/R/utils.R', chdir = TRUE)
+
+
 pdf(paste0("lrpair_",sender_name,'_',receiver_name,'_',ligand,'_',receptor,".pdf"),width=10,height=8)
 out = plot_lrpair(object = obj,ligand = ligand,receptor = receptor,
                     celltype_sender = sender,
@@ -39,3 +43,12 @@ out = plot_path2gene(object = obj,ligand = ligand,receptor = receptor,
                      celltype_receiver = receiver)
 print(out)
 dev.off()
+
+
+# 
+# sender_name = '030_L6_CT_CTX_Glut'
+# sender = '030_L6_CT_CTX_Glut'
+# receiver_name = '004_L6_IT_CTX_Glut'
+# receiver = '004_L6_IT_CTX_Glut'
+# ligand = 'Slc17a7'
+# receptor = 'Gria2'

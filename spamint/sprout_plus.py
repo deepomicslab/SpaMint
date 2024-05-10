@@ -1,10 +1,9 @@
 from scipy.spatial import distance_matrix
 from scipy.sparse import csr_matrix
-from anndata import AnnData
 from . import optimizers
 from . import utils
 from . import cell_selection
-from . import prep_data as prep
+from . import preprocess as pp
 
 import time
 import logging
@@ -163,7 +162,7 @@ class spaMint:
             
         # 1. subset sc_exp and st_exp by intersection genes
         # add v11
-        self.filter_st_exp, self.filter_sc_exp = prep.subset_inter(self.st_exp, self.sc_exp)
+        self.filter_st_exp, self.filter_sc_exp = pp.subset_inter(self.st_exp, self.sc_exp)
         # 2. feature selection
         self.sort_genes = cell_selection.feature_sort(self.filter_sc_exp, degree = 2, span = 0.3)
         self.lr_hvg_genes = cell_selection.lr_shared_top_k_gene(self.sort_genes, self.lr_df, k = 3000, keep_lr_per = 1)
@@ -183,9 +182,10 @@ class spaMint:
         # 4. init cell selection
         self.spot_cell_dict, self.init_cor, self.picked_time = cell_selection.init_solution(self.num, self.filter_st_exp.index.tolist(),
             self.csr_st_exp,self.csr_sc_exp,self.sc_meta[self.cell_type_key],self.trans_id_idx,self.repeat_penalty)
-        self.init_sc_df = cell_selection.dict2df(self.spot_cell_dict,self.filter_st_exp,self.filter_sc_exp,self.sc_meta)
-        self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.filter_sc_exp,self.init_sc_df,self.filter_st_exp)
-        self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df_align)
+        # self.init_sc_df = cell_selection.dict2df(self.spot_cell_dict,self.filter_st_exp,self.filter_sc_exp,self.sc_meta)
+        self.init_sc_df = cell_selection.dict2df(self.spot_cell_dict, norm_hvg_st, norm_hvg_sc,self.sc_meta)
+        # self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(norm_hvg_sc, self.init_sc_df, norm_hvg_st)
+        # self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df_align)
         result = self.init_sc_df
         # TODO del after test
         self.picked_time.to_csv(f'{self.save_path}/init_picked_time.csv')
@@ -193,13 +193,25 @@ class spaMint:
 
         # 5. reselect cells
         print('\t Swap selection start...')
-        for i in range(max_rep):
-            self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.filter_sc_exp,result,self.filter_st_exp)
-            self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df_align)
-            result,self.picked_time = cell_selection.reselect_cell(self.filter_st_exp, self.spots_nn_lst, self.st_aff_profile_df, 
-                                    self.filter_sc_exp, self.sc_meta, self.sum_sc_agg_exp, self.sc_agg_aff_profile_df,
-                                    result, self.picked_time, self.lr_df_align, 
-                                    p = self.p, repeat_penalty = self.repeat_penalty)
+        if self.p == 0:
+            # p == 0, use sprout, input norm_hvg_sc and norm_hvg_st
+            for i in range(max_rep):
+                self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(norm_hvg_sc, result, norm_hvg_st)
+                self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df_align)
+                result, self.after_picked_time = cell_selection.reselect_cell(norm_hvg_st, self.spots_nn_lst, self.st_aff_profile_df, 
+                            norm_hvg_sc, self.csr_sc_exp, self.sc_meta, self.trans_id_idx,
+                            self.sum_sc_agg_exp, self.sc_agg_aff_profile_df,
+                            result, self.picked_time, self.lr_df_align, 
+                            p = self.p, repeat_penalty = self.repeat_penalty)
+        else:
+            for i in range(max_rep):
+                self.sum_sc_agg_exp = cell_selection.get_sum_sc_agg(self.filter_sc_exp,result,self.filter_st_exp)
+                self.sc_agg_aff_profile_df = optimizers.cal_aff_profile(self.sum_sc_agg_exp, self.lr_df_align)
+                result,self.picked_time = cell_selection.reselect_cell(self.filter_st_exp, self.spots_nn_lst, self.st_aff_profile_df, 
+                                        self.filter_sc_exp, self.sc_meta, self.sum_sc_agg_exp, self.sc_agg_aff_profile_df,
+                                        result, self.picked_time, self.lr_df_align, 
+                                        p = self.p, repeat_penalty = self.repeat_penalty)
+
             # TODO del after test
             result.to_csv(f'{self.save_path}/result{i}.csv')
             self.picked_time.to_csv(f'{self.save_path}/picked_time{i}.csv')
@@ -292,7 +304,7 @@ class spaMint:
         self.dim = dim
         if not isinstance(self.sc_ref, np.ndarray):
             self.sc_ref = np.array(self.sc_ref.loc[self.sc_agg_meta['sc_id']])
-        print('Running v11 now...')
+        print('Running v12 now...')
         res_col = ['loss1','loss2','loss3','loss4','loss5','total']
         result = pd.DataFrame(columns=res_col)
         if self.st_tp == 'slide-seq':

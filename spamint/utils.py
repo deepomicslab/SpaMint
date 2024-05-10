@@ -45,15 +45,20 @@ def check_index_str(st_adata, sc_adata, sc_ref,weight):
         print(f'The cell index of sc_ref is not str, changed to str for consistency.')    
     return st_adata, sc_adata, sc_ref, weight
 
+
 def check_spots(st_adata,weight):
     # st, decon spot match
-    if len(set(weight.index).intersection(set(st_adata.obs.index))) == 0:
+    if (weight.index == st_adata.obs.index).all():
+        pass
+    elif len(set(weight.index).intersection(set(st_adata.obs.index))) == 0:
         raise ValueError('No spot intersection found between st_adata and weight file.')
     else:
-        shared_idx = list(set(weight.index).intersection(set(st_adata.obs.index)))
-        weight = weight.loc[shared_idx]
+        # shared_idx = list(set(weight.index).intersection(set(st_adata.obs.index)))
+        shared_idx = st_adata.obs.index.isin(weight.index)
         st_adata = st_adata[shared_idx,:]
-        # print(f'Spot index in weight matrix is different from ST expression\'s.\n Adjusted to {len(shared_idx)} shared spots.')
+        weight = weight.loc[shared_idx]
+        weight = weight.reindex(st_adata.obs.index)
+        print(f'Spot index in weight matrix is different from ST expression\'s.\n Adjusted to {len(shared_idx)} shared spots.')
     return st_adata, weight
 
 
