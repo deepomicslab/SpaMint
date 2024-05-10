@@ -1,4 +1,4 @@
-# SpedMod 
+# SpexMod
 
 # Pre-requirements
 * python3, numpy, pandas, scipy
