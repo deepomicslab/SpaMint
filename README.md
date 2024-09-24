@@ -5,8 +5,11 @@ The software implementation of the method in
 <img src='https://github.com/deepomicslab/SpexMod/blob/main/main.jpg'>
 
 # Pre-requirements
-* python3, numpy, pandas, scipy
-* umap-learn, 
+* numpy, pandas==1.5.2
+* scipy
+* scanpy
+* loess
+* umap
   
 
 # Installation
