@@ -91,23 +91,22 @@ obj = spamint.spaMint(save_path = outDir, st_adata = st_adata, weight = st_decon
                  st_tp = st_tp)
 obj.prep()
 ```
-### Input file format
-* **Output Dir**
-  * `save_path` Dir to save results
+### Parameters
+* `save_path` Output Dir to save results
+  
+* `st_adata` adata.X Spatial Transcriptomics (ST) Count Data with spots as rows and genes as columns
+  * `st_adata.obs`  dataframe with spot as rows, spot coordinates x and y as columns
     
-* **Spatial Transcriptomics (ST) Count Data**
-  * `st_adata` adata.X with spots as rows and genes as columns
-  * `st_adata.obs`  dataframe with spot as rows, spot coordinates x and y as columns 
- 
-* **Cell-type deconvoluted spatial matrix**
-  * `weight` dataframe with spot as rows and cell-type as columns
-
-* **Single-cell RNA-seq Count Data**
-  * `sc_adata` adata.X dataframe with cells as rows and genes as columns
+* `weight` Cell-type deconvoluted spatial dataframe with spot as rows and cell-type as columns
+    
+* `sc_distribution` Single-cell RNA-seq distribution dataframe with cells as rows and genes as columns
+    
+* `sc_adata` adata.X Single-cell RNA-seq Count dataframe with cells as rows and genes as columns
   * `sc_adata.obs` dataframe with cells as rows and cell types as columns
+ 
+* `cell_type_key` cell type colname in sc_adata.obs
 
-* **Single-cell RNA-seq distribution Data**
-  * `sc_distribution` dataframe with cells as rows and genes as columns
+* `st_tp` ST sequencing platform choose from st (ST legacy), visium (10X Visium), or slide-seq (Any single-cell resolution data)
 
 
 </details>
