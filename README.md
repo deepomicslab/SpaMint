@@ -111,27 +111,75 @@ obj.prep()
 
 </details>
 
-## Cell selection
+## Initial process (Cell selection)
 <details><summary>Expand section</summary>
-select_cells(self, p = 0.1, mean_num_per_spot = 10,  max_rep = 3, repeat_penalty = 10)
-        - p: Persentage of interface similarity for cell selection.
-        - mean_num_per_spot: Average number of cells per spot.
-        - max_rep: Maximum number of repetitions for cell selection.
-        - repeat_penalty: Penalty applied for repeated selections.
+  ```python
+sc_agg_meta = select_cells(self, p = 0.1, mean_num_per_spot = 10,  max_rep = 3, repeat_penalty = 10)
+        - p: Percentage of interface similarity for cell selection.
+        - 
+        - : 
+        - : repeat_penalty
+```
+* `p` percentage of the interface similarity during cell selection
+* `mean_num_per_spot` Average number of cells per spot.
+* `max_rep` Maximum number of repetitions for cell selection.
+* `repeat_penalty` When one cell has been picked for [THIS] many times, its probability of being picked again decreases by half.
+                    Recommanded to be near   (st_exp.shape[0]*num_per_spot/sc_exp.shape[0]) * 10
+</details>
 
-gradient_descent(self, alpha, beta, gamma, delta, eta, 
-                init_sc_embed = False,
+## Refinement process (Gradient descent)
+<details><summary>Expand section</summary>
+
+ ```python 
+refine_sc_exp, sc_agg_meta = gradient_descent(self, alpha = 1, beta = 0.001, gamma = 0.001, 
+                 delta = 0.1, eta = 0.0005, 
+                init_sc_embed = None,
                 iteration = 20, k = 2, W_HVG = 2,
-                left_range = 1, right_range = 2, steps = 1, dim = 2)
+                left_range = 0, right_range = 8, steps = 1, dim = 2)
+```
 
-        Parameters:
-        - alpha, beta, gamma, delta: Hyperparameters for the loss function.
-        - eta: Learning rate for gradient descent.
-        - init_sc_embed: Initial embedding for single-cell data.
-        - iteration: Number of iterations for optimization.
-        - k: Number of neighbors for KNN calculations.
-        - W_HVG: Weight for highly variable genes.
-        - left_range, right_range: Range parameters for embeddings.
-        - steps: Number of steps for embedding adjustments.
-        - dim: Dimensionality for embedding.
+* `alpha, beta, gamma, delta`
+  Hyperparameters for the loss function.
+
+  alpha: the weight of the term that maintains the expression similarity between cells and their respective gamma distribution models, default: 1.
+  
+  beta: the weight of adjusting cell locations based on cell-cell affinity.
+  
+  gamma: the weight of optimizing interface profile similarity between pseudo-spots and their corresponding ST spots, default: 0.001.
+  
+  delta: the weight of the regularization term.
+  
+* `eta` float, default: 0.0005
+  
+    Learning rate for gradient descent.
+  
+* `init_sc_embed` DataFrame, optional, default: None
+  
+    Initial embedding for single-cell data.
+  
+* `iteration` int, optional, default: 20
+  
+    The number of iterations for optimization.
+  
+* `k` int, optional, default: 2
+  
+    The number of neighbors in each adjacent spot.
+  
+* `W_HVG` int, optional, default: 2
+  
+    Weight for highly variable genes.
+  
+* `left_range` int, optional, default: 0
+* `right_range` int, optional, default: 8
+  
+    The index range for the neighbor number in the embedding process, the actual neighbor number is (i+1)*10
+    
+* `steps` int, optional, default: 1
+  
+    The iteration number for each neighbor
+  
+  
+* `dim` int, optional, default: 2
+  
+    The embedding dimension of the reconstruction
 </details>
