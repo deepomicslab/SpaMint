@@ -183,3 +183,5 @@ refine_sc_exp, sc_agg_meta = gradient_descent(self, alpha = 1, beta = 0.001, gam
   
     The embedding dimension of the reconstruction
 </details>
+
+More details in demo_tutorial.ipynb
