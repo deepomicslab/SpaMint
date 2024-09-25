@@ -11,23 +11,10 @@ The software implementation of the method in
 * smurf-imputation
   
 # Installation
-<details><summary>Expand section</summary>
-  
 ## Installation with pip
 ```shell
-pip install pySPAMINT
+pip install pyStrint
 ```
-## Installation from the source code
-conda create --name spamint python=3.9
-conda activate spamint
-```shell
-wget https://github.com/deepomicslab/SpaMint/archive/refs/heads/main.zip
-unzip main.zip
-cd SpaMint-main
-python setup.py install
-```
- </details>
-
 
 # Input file format
 ## 1. DataFrame format
