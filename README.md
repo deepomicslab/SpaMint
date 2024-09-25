@@ -11,7 +11,6 @@ The software implementation of the method in
 * smurf-imputation
   
 # Installation
-## Installation with pip
 ```shell
 pip install pyStrint
 ```
