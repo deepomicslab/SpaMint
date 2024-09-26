@@ -99,12 +99,9 @@ obj.prep()
 
 ## Initial process (Cell selection)
 <details><summary>Expand section</summary>
+  
   ```python
 sc_agg_meta = select_cells(self, p = 0.1, mean_num_per_spot = 10,  max_rep = 3, repeat_penalty = 10)
-        - p: Percentage of interface similarity for cell selection.
-        - 
-        - : 
-        - : repeat_penalty
 ```
 * `p` percentage of the interface similarity during cell selection
 * `mean_num_per_spot` Average number of cells per spot.
